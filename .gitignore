@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+*.db
+*.db-journal
+server/storage
+server/storage-test
+server/src/generated
+.DS_Store
+coverage
+*.log

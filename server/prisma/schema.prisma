@@ -1,0 +1,296 @@
+// ReturnFlow — data model (Milestone 1)
+//
+// Tenancy
+// -------
+// `Organization` is the tenant boundary. Every business record (customers,
+// orders, returns, integrations, keys, audit entries) carries an
+// `organizationId`, and every query in the API is scoped by the organization
+// resolved from the authenticated session, API key, or portal slug — never
+// from a client-supplied id.
+//
+// Users are global identities; `Membership` attaches a user to a tenant with
+// a role, so one person can later belong to several businesses.
+//
+// Conventions
+// -----------
+// * Money is stored as integer minor units (paise / cents) plus the order's
+//   ISO currency code. No floats anywhere near a refund.
+// * Enumerations are stored as strings and validated in the application layer
+//   (see src/returns/status.ts, src/auth/rbac.ts) so the schema stays portable
+//   between SQLite (local/staging) and PostgreSQL (production).
+// * Secrets (Shopify tokens, webhook secrets) are AES-256-GCM encrypted at the
+//   application layer before they reach the database.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Organization {
+  id                String   @id @default(cuid())
+  name              String
+  slug              String   @unique
+  currency          String   @default("INR")
+  brandColor        String   @default("#1f2a37")
+  logoKey           String?
+  supportEmail      String?
+  portalHeadline    String?
+  returnWindowDays  Int      @default(30)
+  webhookSecretEnc  String
+  nextReturnNumber  Int      @default(1001)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  memberships   Membership[]
+  customers     Customer[]
+  orders        Order[]
+  orderItems    OrderItem[]
+  returns       ReturnRequest[]
+  returnPhotos  ReturnPhoto[]
+  returnEvents  ReturnEvent[]
+  integrations  Integration[]
+  apiKeys       ApiKey[]
+  syncRuns      SyncRun[]
+  auditLogs     AuditLog[]
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  memberships Membership[]
+}
+
+model Membership {
+  id             String       @id @default(cuid())
+  userId         String
+  organizationId String
+  role           String // admin | manager | support | warehouse | finance
+  status         String       @default("active") // active | disabled
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+}
+
+model Customer {
+  id             String   @id @default(cuid())
+  organizationId String
+  email          String
+  name           String?
+  phone          String?
+  externalId     String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  orders       Order[]
+  returns      ReturnRequest[]
+
+  @@unique([organizationId, email])
+}
+
+model Order {
+  id              String    @id @default(cuid())
+  organizationId  String
+  customerId      String
+  orderNumber     String
+  externalId      String?
+  source          String // shopify | api | webhook | csv
+  status          String // pending | fulfilled | delivered | cancelled
+  paymentMethod   String    @default("prepaid") // prepaid | cod
+  currency        String
+  totalMinor      Int
+  placedAt        DateTime
+  deliveredAt     DateTime?
+  shippingAddress String? // JSON
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer     Customer        @relation(fields: [customerId], references: [id])
+  items        OrderItem[]
+  returns      ReturnRequest[]
+
+  @@unique([organizationId, orderNumber])
+  @@index([organizationId, placedAt])
+  @@index([organizationId, source])
+}
+
+model OrderItem {
+  id             String  @id @default(cuid())
+  organizationId String
+  orderId        String
+  lineKey        String // external line id, or SKU when the source has none
+  sku            String
+  name           String
+  variant        String?
+  category       String?
+  quantity       Int
+  unitPriceMinor Int
+  imageUrl       String?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  order        Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  returnItems  ReturnItem[]
+
+  @@unique([orderId, lineKey])
+  @@index([organizationId, sku])
+}
+
+model ReturnRequest {
+  id             String   @id @default(cuid())
+  organizationId String
+  number         Int
+  orderId        String
+  customerId     String
+  status         String // see src/returns/status.ts
+  resolution     String // refund | store_credit | replacement
+  channel        String   @default("portal") // portal | staff
+  customerNote   String?
+  valueMinor     Int
+  currency       String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  order        Order         @relation(fields: [orderId], references: [id])
+  customer     Customer      @relation(fields: [customerId], references: [id])
+  items        ReturnItem[]
+  photos       ReturnPhoto[]
+  events       ReturnEvent[]
+
+  @@unique([organizationId, number])
+  @@index([organizationId, status, createdAt])
+}
+
+model ReturnItem {
+  id           String  @id @default(cuid())
+  returnId     String
+  orderItemId  String
+  quantity     Int
+  reason       String // see src/returns/reasons.ts
+  reasonDetail String?
+
+  returnRequest ReturnRequest @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  orderItem     OrderItem     @relation(fields: [orderItemId], references: [id])
+  photos        ReturnPhoto[]
+}
+
+model ReturnPhoto {
+  id             String   @id @default(cuid())
+  organizationId String
+  returnId       String
+  returnItemId   String?
+  storageKey     String
+  mimeType       String
+  sizeBytes      Int
+  uploadedBy     String   @default("customer") // customer | staff
+  createdAt      DateTime @default(now())
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  returnRequest ReturnRequest @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  returnItem    ReturnItem?   @relation(fields: [returnItemId], references: [id], onDelete: Cascade)
+}
+
+model ReturnEvent {
+  id             String   @id @default(cuid())
+  organizationId String
+  returnId       String
+  type           String // status | note | system
+  status         String?
+  message        String
+  actorType      String // customer | user | system
+  actorId        String?
+  actorLabel     String?
+  createdAt      DateTime @default(now())
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  returnRequest ReturnRequest @relation(fields: [returnId], references: [id], onDelete: Cascade)
+
+  @@index([returnId, createdAt])
+}
+
+model Integration {
+  id             String    @id @default(cuid())
+  organizationId String
+  provider       String // shopify
+  mode           String    @default("live") // live | sandbox
+  displayName    String
+  configEnc      String // encrypted JSON (shop domain, access token, API secret)
+  status         String    @default("connected") // connected | error | disconnected
+  lastError      String?
+  lastSyncedAt   DateTime?
+  syncCursor     String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, provider])
+}
+
+model ApiKey {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  prefix         String    @unique
+  hash           String
+  createdById    String?
+  lastUsedAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model SyncRun {
+  id             String    @id @default(cuid())
+  organizationId String
+  source         String // shopify | api | webhook | csv
+  trigger        String // manual | webhook | api | upload | schedule
+  status         String // running | success | partial | failed
+  label          String?
+  received       Int       @default(0)
+  created        Int       @default(0)
+  updated        Int       @default(0)
+  failed         Int       @default(0)
+  errors         String? // JSON array of { ref, message }
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, startedAt])
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  actorType      String // user | customer | api_key | system
+  actorId        String?
+  actorLabel     String
+  action         String
+  entityType     String?
+  entityId       String?
+  meta           String? // JSON
+  ip             String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+}
