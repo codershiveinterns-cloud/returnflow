@@ -3,7 +3,7 @@ import { z } from "zod";
 
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  PORT: z.coerce.number().default(4000),
+  API_PORT: z.coerce.number().default(4000),
   DATABASE_URL: z.string().default("file:./prisma/dev.db"),
   APP_URL: z.string().url().default("http://localhost:5173"),
   PUBLIC_API_URL: z.string().url().default("http://localhost:4000"),

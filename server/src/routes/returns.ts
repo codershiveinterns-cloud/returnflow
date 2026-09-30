@@ -21,14 +21,16 @@ const listQuery = pagination.extend({
 returnsRouter.get("/", requirePermission("returns:view"), async (req, res) => {
   const { orgId } = auth(req);
   const q = listQuery.parse(req.query);
-  const term = q.q?.replace(/^#/, "").replace(/^rf-/i, "");
+  const rmaOnly = q.q ? /^rf-?\d+$/i.test(q.q) : false;
+  const term = q.q?.replace(/^#/, "").replace(/^rf-?/i, "");
   const where: Prisma.ReturnRequestWhereInput = {
     organizationId: orgId,
     ...(q.status && { status: q.status }),
     ...(q.resolution && { resolution: q.resolution }),
     ...(q.reason && { items: { some: { reason: q.reason } } }),
     ...(q.minValue !== undefined && { valueMinor: { gte: Math.round(q.minValue * 100) } }),
-    ...(term && {
+    ...(term && rmaOnly && { number: Number(term) }),
+    ...(term && !rmaOnly && {
       OR: [
         ...(/^\d+$/.test(term) ? [{ number: Number(term) }] : []),
         { order: { orderNumber: { contains: term } } },

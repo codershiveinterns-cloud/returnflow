@@ -141,7 +141,8 @@ async function main() {
     { order: "1024", lines: [{ sku: "SNK-CNV-8-WHT", reason: "other", detail: "Gift — recipient already had the same pair" }], resolution: "store_credit", days: 13 },
   ];
 
-  for (const r of requests) {
+  // Oldest first, so RMA numbers increase with time like real traffic
+  for (const r of [...requests].sort((a, b) => b.days - a.days)) {
     const order = await db.order.findUniqueOrThrow({ where: { organizationId_orderNumber: { organizationId: kaveri.id, orderNumber: r.order } }, include: { items: true, customer: true } });
     const lines = r.lines.map((l) => ({ ...l, item: order.items.find((i) => i.sku === l.sku) })).filter((l) => l.item);
     if (!lines.length) continue;

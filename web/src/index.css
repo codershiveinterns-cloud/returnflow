@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+/*
+ * ReturnFlow design tokens.
+ * Warm paper neutrals + ink, with a single kraft accent (the colour of a
+ * shipping carton). Status colours carry meaning and are used for nothing else:
+ *   amber = needs review · blue = in progress · red = flagged/rejected · green = resolved
+ */
+@theme {
+  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-display: "Fraunces", Georgia, serif;
+
+  --color-paper: #f5f3ee;
+  --color-paper-2: #efece5;
+  --color-surface: #ffffff;
+  --color-line: #e3dfd6;
+  --color-line-strong: #d3cec2;
+  --color-ink: #15171a;
+  --color-ink-2: #2b2e33;
+  --color-muted: #6b6860;
+  --color-faint: #9a968c;
+
+  --color-kraft: #c48a3f;
+  --color-kraft-soft: #f3e6d2;
+  --color-kraft-ink: #7a4f17;
+
+  --color-review: #b26b00;
+  --color-review-bg: #fdf2dc;
+  --color-progress: #1f5fbf;
+  --color-progress-bg: #e5eefb;
+  --color-danger: #b42318;
+  --color-danger-bg: #fbe7e5;
+  --color-done: #1d7a4a;
+  --color-done-bg: #e1f2e8;
+
+  --radius-card: 10px;
+  --shadow-pop: 0 1px 0 rgb(21 23 26 / 0.04), 0 8px 24px -8px rgb(21 23 26 / 0.18);
+  --shadow-drawer: -24px 0 48px -24px rgb(21 23 26 / 0.25);
+
+  --animate-fade-in: fade-in 160ms ease-out;
+  --animate-slide-in: slide-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-rise: rise 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes fade-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes slide-in { from { transform: translateX(24px); opacity: 0 } to { transform: none; opacity: 1 } }
+@keyframes rise { from { transform: translateY(6px); opacity: 0 } to { transform: none; opacity: 1 } }
+
+@layer base {
+  html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  body { @apply bg-paper text-ink font-sans text-[14px] leading-[1.45]; font-feature-settings: "ss01", "cv11"; }
+  ::selection { background: var(--color-kraft-soft); color: var(--color-ink); }
+  :focus-visible { outline: 2px solid var(--color-ink); outline-offset: 2px; border-radius: 4px; }
+  .tabular { font-variant-numeric: tabular-nums; }
+}
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+/* Subtle ruled-paper texture used on auth and portal backdrops */
+@utility bg-ruled {
+  background-image: linear-gradient(to bottom, rgb(21 23 26 / 0.035) 1px, transparent 1px);
+  background-size: 100% 28px;
+}

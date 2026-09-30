@@ -50,6 +50,7 @@ describe("customer return portal", () => {
 
     const support = await login("support@kaveri.test");
     const list = await support.get(`/api/returns?q=${res.body.rma}`);
+    expect(list.body.total).toBe(1); // an RMA search must not also match order numbers
     expect(list.body.returns[0]).toMatchObject({ rma: res.body.rma, status: "requested", photoCount: 1, reasons: ["defective"] });
     const detail = await support.get(`/api/returns/${list.body.returns[0].id}`);
     expect(detail.body.customerNote).toBe("Evening pickup please");

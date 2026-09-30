@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "description": "ReturnFlow — multi-tenant reverse logistics SaaS",
-  "workspaces": ["server", "web"],
+  "workspaces": [
+    "server",
+    "web"
+  ],
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,magenta \"npm:dev -w server\" \"npm:dev -w web\"",
     "build": "npm run build -w server && npm run build -w web",
@@ -13,7 +16,9 @@
     "db:reset": "npm run db:reset -w server"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.4"
   },
-  "engines": { "node": ">=22" }
+  "engines": {
+    "node": ">=22"
+  }
 }
