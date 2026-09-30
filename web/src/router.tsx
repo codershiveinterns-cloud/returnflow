@@ -13,9 +13,10 @@ import { AuditPage } from "./pages/app/Audit";
 import { PortalPage } from "./pages/portal/Portal";
 import { TrackPage } from "./pages/portal/Track";
 import { NotFound } from "./pages/NotFound";
+import { LandingPage } from "./pages/landing/Landing";
 
 export const router = createBrowserRouter([
-  { path: "/", element: <AuthGate mode="redirect" /> },
+  { path: "/", element: <LandingPage /> },
   { path: "/login", element: <AuthGate mode="guest"><LoginPage /></AuthGate> },
   { path: "/signup", element: <AuthGate mode="guest"><SignupPage /></AuthGate> },
   {
