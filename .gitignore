@@ -9,3 +9,8 @@ server/src/generated
 .DS_Store
 coverage
 *.log
+
+# Vercel demo build artefacts
+server/prisma/demo-build.db
+server/.demo-build-storage
+.vercel

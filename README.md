@@ -35,6 +35,22 @@ Portal test order: **#1001** with `ananya.rao@example.com` (or phone `98000 0000
 
 `npm run db:reset` wipes and re-seeds the local database.
 
+## Deploying to Vercel (demo mode)
+
+`vercel.json` deploys two services on one domain: `web` (Vite) at `/` and
+`server` (Express) at `/api/*`.
+
+1. Import the repo in Vercel (root directory `./`).
+2. Add two environment variables, each generated with `openssl rand -hex 32`:
+   `SESSION_SECRET` and `ENCRYPTION_KEY`.
+3. Deploy.
+
+Demo mode bakes a seeded SQLite database into the server build and restores it
+into `/tmp` on each instance. **Nothing created on the live site is durable** —
+signups, returns and photos disappear when Vercel recycles an instance. For a
+real deployment, move to PostgreSQL and object storage (see
+`docs/ARCHITECTURE.md` → Production path).
+
 ## Scripts
 
 | Command | What it does |

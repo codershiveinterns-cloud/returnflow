@@ -1,6 +1,17 @@
 import "dotenv/config";
 import { z } from "zod";
 
+/** True when running inside a Vercel function (not during the Vercel build). */
+export const onVercelRuntime = !!process.env.VERCEL && !process.env.RF_BUILDING;
+
+// Same-origin defaults for Vercel deployments, so only the secrets need configuring.
+const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL;
+if (process.env.VERCEL && vercelHost) {
+  process.env.APP_URL ??= `https://${vercelHost}`;
+  process.env.PUBLIC_API_URL ??= `https://${vercelHost}`;
+}
+if (onVercelRuntime) process.env.STORAGE_DIR ??= "/tmp/returnflow-storage";
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   API_PORT: z.coerce.number().default(4000),
