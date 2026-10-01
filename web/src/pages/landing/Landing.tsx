@@ -199,7 +199,7 @@ function Footer() {
         {[
           ["Product", [["How it works", "#how"], ["Customer portal", "#product"], ["Teams", "#teams"], ["Integrations", "#integrations"]]],
           ["Company", [["Security", "#security"], ["FAQ", "#faq"], ["Contact", "mailto:hello@returnflow.app"]]],
-          ["Get started", [["Create a workspace", "/signup"], ["Sign in", "/login"], ["Demo portal", "/r/kaveri"]]],
+          ["Get started", [["Create a workspace", "/signup"], ["Sign in", "/login"], ["Customer portal", "/r/kaveri"]]],
         ].map(([title, links]) => (
           <div key={title as string}>
             <div className="font-mono text-[11px] tracking-[0.14em] uppercase text-[#6f6c66]">{title as string}</div>

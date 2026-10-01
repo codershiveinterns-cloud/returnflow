@@ -121,12 +121,12 @@ async function main() {
       organizationId: kaveri.id,
       provider: "shopify",
       mode: "sandbox",
-      displayName: "Sandbox store",
-      configEnc: encryptJson({ shopDomain: "sandbox-store.myshopify.com", accessToken: "sandbox", apiSecret: `sandbox_${randomToken(16)}` }),
+      displayName: "Test store",
+      configEnc: encryptJson({ shopDomain: "test-store.myshopify.com", accessToken: "sandbox", apiSecret: `sandbox_${randomToken(16)}` }),
       lastSyncedAt: new Date(),
     },
   });
-  await recordSync(kaveri.id, { source: "shopify", trigger: "manual", label: "Sandbox store" }, () => ingestOrders(kaveri.id, sandboxOrders(12, 3001).map(mapShopifyOrder), "shopify"));
+  await recordSync(kaveri.id, { source: "shopify", trigger: "manual", label: "Test store" }, () => ingestOrders(kaveri.id, sandboxOrders(12, 3001).map(mapShopifyOrder), "shopify"));
 
   // Return requests as they would arrive from the portal
   const requests: { order: string; lines: { sku: string; qty?: number; reason: string; detail?: string }[]; resolution: string; days: number; note?: string }[] = [

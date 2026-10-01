@@ -71,7 +71,7 @@ export function ReturnsPage() {
 
   return (
     <>
-      <PageHeader title="Returns" description="Every request from the customer portal lands here with its photos, order and history. Approval actions arrive with the rules engine in the next milestone." />
+      <PageHeader title="Returns" description="Every request from your customer portal, with its photos, original order and full history." />
 
       <div className="flex gap-1.5 overflow-x-auto scrollbar-thin pb-1 -mx-1 px-1">
         {STATUS_FILTERS.filter((s) => !s || counts[s] || s === "requested").map((s) => {
@@ -321,10 +321,6 @@ function ReturnDrawer({ id, onClose }: { id: string | null; onClose: () => void 
                   </div>
                 </li>
               ))}
-              <li className="relative text-[12.5px] text-faint">
-                <span className="absolute -left-[25px] top-1 size-2 rounded-full border border-dashed border-faint bg-paper" />
-                Next: review & approve — available in Milestone 2
-              </li>
             </ol>
           </section>
         </div>

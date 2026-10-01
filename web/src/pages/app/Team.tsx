@@ -93,7 +93,7 @@ export function TeamPage() {
 
       {data && (
         <Card className="mt-6 overflow-hidden">
-          <CardHeader title="What each role can do" description="New capabilities (approve, inspect, refund…) are added to these roles as each milestone ships." />
+          <CardHeader title="What each role can do" description="Permissions are enforced by the server on every request." />
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-[13px]">
               <thead>
@@ -144,7 +144,7 @@ function AddMemberModal({ open, onClose, roles }: { open: boolean; onClose: () =
       open={open}
       onClose={onClose}
       title="Add a teammate"
-      description="They'll sign in with this email and the temporary password you set. Email invitations arrive with notifications in Milestone 2."
+      description="They'll sign in with this email and the temporary password you set. Share it with them securely."
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>

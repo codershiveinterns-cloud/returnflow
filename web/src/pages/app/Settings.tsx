@@ -111,7 +111,7 @@ export function SettingsPage() {
           </Card>
 
           <Card>
-            <CardHeader title="Policy" description="Shown to customers. Automatic eligibility rules that enforce these arrive in Milestone 2." />
+            <CardHeader title="Policy" description="Shown to customers on your return portal." />
             <div className="px-5 pb-5 grid sm:grid-cols-3 gap-4">
               <Input label="Return window" type="number" min={1} max={365} value={form.returnWindowDays} onChange={(e) => setForm({ ...form, returnWindowDays: e.target.value })} trailing={<span className="text-[12px] text-muted pr-1">days</span>} error={err?.fieldError("returnWindowDays")} />
               <Select label="Default currency" value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>

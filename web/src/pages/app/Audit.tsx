@@ -58,7 +58,7 @@ export function AuditPage() {
     <>
       <PageHeader
         title="Audit log"
-        description="An append-only record of who did what — sign-ins, imports, key changes, and every return request. Approvals, refunds and inventory changes are recorded here as they arrive."
+        description="An append-only record of who did what and when — sign-ins, order imports, key changes, settings and every return request."
         actions={
           <Select value={action} onChange={(e) => { setAction(e.target.value); setPage(1); }} className="w-52" aria-label="Filter">
             <option value="">All activity</option>

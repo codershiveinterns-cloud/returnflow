@@ -112,7 +112,7 @@ function ShopifyPanel({ data }: { data: IntegrationsData }) {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-[16px] font-semibold">{s.displayName}</h2>
-                  {s.mode === "sandbox" ? <Badge tone="review">Sandbox</Badge> : <Badge tone="done">Live</Badge>}
+                  {s.mode === "sandbox" ? <Badge tone="review">Test mode</Badge> : <Badge tone="done">Live</Badge>}
                   {s.status === "error" && <Badge tone="danger">Needs attention</Badge>}
                 </div>
                 <div className="mt-0.5 font-mono text-[12.5px] text-muted">{s.shopDomain}</div>
@@ -130,7 +130,7 @@ function ShopifyPanel({ data }: { data: IntegrationsData }) {
             {s.mode === "sandbox" && (
               <div className="mx-5 mb-4 flex gap-2.5 rounded-lg bg-kraft-soft/60 text-kraft-ink px-3.5 py-3 text-[13px]">
                 <FlaskConical className="size-4 shrink-0 mt-0.5" />
-                <span>Sandbox generates realistic Shopify orders and runs them through the same import pipeline as a live store. Connect your real store whenever you're ready — existing orders stay.</span>
+                <span>Test mode creates sample Shopify orders so you can try returns end to end. Connect your store whenever you're ready — imported orders are kept.</span>
               </div>
             )}
             <div className="border-t border-line px-5 py-4">
@@ -209,7 +209,7 @@ function ShopifyConnectModal({ open, onClose, hasSandbox, onDone }: { open: bool
         <>
           {hasSandbox && (
             <Button variant="ghost" className="mr-auto" onClick={() => connect.mutate({ mode: "sandbox" })} disabled={connect.isPending} icon={<FlaskConical className="size-4" />}>
-              Use sandbox store
+              Use a test store
             </Button>
           )}
           <Button variant="secondary" onClick={onClose}>

@@ -2,9 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import {
-  LayoutGrid, Undo2, ShoppingBag, Plug, Users, Settings2, ScrollText, ClipboardCheck, Wallet, Workflow, BarChart3, ExternalLink, LogOut, Menu, X, ChevronsUpDown, Lock,
-} from "lucide-react";
+import { LayoutGrid, Undo2, ShoppingBag, Plug, Users, Settings2, ScrollText, ExternalLink, LogOut, Menu, X, ChevronsUpDown, Lock } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Permission } from "@/lib/domain";
 import { useCan, useSession, useSignOut } from "@/lib/session";
@@ -59,12 +57,6 @@ export function AppLayout() {
     { to: "/app/settings", label: "Portal & brand", icon: Settings2, permission: "settings:manage" },
     { to: "/app/audit", label: "Audit log", icon: ScrollText, permission: "audit:view" },
   ];
-  const upcoming = [
-    { label: "Rules", icon: Workflow, milestone: "M2" },
-    { label: "Inspection", icon: ClipboardCheck, milestone: "M3" },
-    { label: "Refunds", icon: Wallet, milestone: "M3" },
-    { label: "Analytics", icon: BarChart3, milestone: "M4" },
-  ];
 
   const sidebar = (
     <div className="flex h-full flex-col bg-[#131519] text-[#c9c6bf]">
@@ -85,16 +77,6 @@ export function AppLayout() {
             <NavGroup items={workspace.filter((i) => can(i.permission))} />
           </>
         )}
-        <GroupLabel>On the roadmap</GroupLabel>
-        <ul className="space-y-px">
-          {upcoming.map((u) => (
-            <li key={u.label} className="flex items-center gap-2.5 h-8 px-2.5 rounded-md text-[13.5px] text-[#6f6c66] cursor-default" title={`Arrives in milestone ${u.milestone.slice(1)}`}>
-              <u.icon className="size-4" strokeWidth={1.75} />
-              <span className="flex-1">{u.label}</span>
-              <span className="font-mono text-[10.5px] px-1.5 py-px rounded border border-white/10 text-[#8b877f]">{u.milestone}</span>
-            </li>
-          ))}
-        </ul>
       </nav>
 
       <a

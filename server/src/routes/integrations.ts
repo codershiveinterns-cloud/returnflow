@@ -75,8 +75,8 @@ integrationsRouter.post("/shopify", async (req, res) => {
       throw badRequest(err instanceof Error ? err.message : "Could not reach Shopify");
     }
   } else {
-    config = { shopDomain: "sandbox-store.myshopify.com", accessToken: "sandbox", apiSecret: `sandbox_${randomToken(16)}` };
-    displayName = "Sandbox store";
+    config = { shopDomain: "test-store.myshopify.com", accessToken: "sandbox", apiSecret: `sandbox_${randomToken(16)}` };
+    displayName = "Test store";
   }
   const data = { mode: body.mode, displayName, configEnc: encryptJson(config), status: "connected", lastError: null, syncCursor: null };
   const integration = await db.integration.upsert({

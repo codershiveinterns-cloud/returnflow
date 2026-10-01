@@ -118,7 +118,7 @@ export function OverviewPage() {
             }
           />
           <div className="px-5 pb-2 grid grid-cols-3 gap-2">
-            <Channel icon={<ShoppingBag className="size-4" />} label="Shopify" state={data?.channels.shopify ? (data.channels.shopify.mode === "sandbox" ? "Sandbox" : "Live") : "Off"} on={!!data?.channels.shopify} />
+            <Channel icon={<ShoppingBag className="size-4" />} label="Shopify" state={data?.channels.shopify ? (data.channels.shopify.mode === "sandbox" ? "Test mode" : "Live") : "Off"} on={!!data?.channels.shopify} />
             <Channel icon={<Webhook className="size-4" />} label="API keys" state={data ? String(data.channels.apiKeys) : "–"} on={!!data?.channels.apiKeys} />
             <Channel icon={<FileSpreadsheet className="size-4" />} label="CSV" state="Ready" on />
           </div>
