@@ -65,7 +65,7 @@ docs/ARCHITECTURE.md
 ## Milestone 1 checklist
 
 - [x] Architecture: multi-tenant model, schema, return status flow (`docs/ARCHITECTURE.md`)
-- [x] Scaffolding: monorepo, TypeScript, CI workflow (`.github/workflows/ci.yml`)
+- [x] Scaffolding: monorepo, TypeScript, CI workflow (ready to enable: copy `docs/ci-workflow.yml` to `.github/workflows/ci.yml`)
 - [x] Email/password auth, 5 staff roles, server-enforced permissions
 - [x] Order sync: Shopify (pull + HMAC webhooks, sandbox mode), REST API with keys, signed webhook, CSV with preview
 - [x] Customer portal: order lookup, item & quantity selection, reason, photo upload, refund / store credit / replacement, confirmation and tracking
