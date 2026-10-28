@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { LayoutGrid, Undo2, ShoppingBag, Plug, Users, Settings2, ScrollText, ExternalLink, LogOut, Menu, X, ChevronsUpDown, Lock } from "lucide-react";
+import { LayoutGrid, Undo2, ShoppingBag, Plug, Users, Settings2, ScrollText, ExternalLink, LogOut, Menu, X, ChevronsUpDown, Lock, Truck, Workflow, Mail } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Permission } from "@/lib/domain";
 import { useCan, useSession, useSignOut } from "@/lib/session";
@@ -49,10 +49,13 @@ export function AppLayout() {
   const operate: NavItem[] = [
     { to: "/app/overview", label: "Overview", icon: LayoutGrid, permission: "dashboard:view" },
     { to: "/app/returns", label: "Returns", icon: Undo2, permission: "returns:view", badge: pending.data?.total },
+    { to: "/app/pickups", label: "Pickups", icon: Truck, permission: "pickups:manage" },
     { to: "/app/orders", label: "Orders", icon: ShoppingBag, permission: "orders:view" },
   ];
   const workspace: NavItem[] = [
-    { to: "/app/integrations", label: "Order sync", icon: Plug, permission: "integrations:manage" },
+    { to: "/app/rules", label: "Rules & policy", icon: Workflow, permission: "rules:manage" },
+    { to: "/app/notifications", label: "Notifications", icon: Mail, permission: "notifications:view" },
+    { to: "/app/integrations", label: "Integrations", icon: Plug, permission: "integrations:manage" },
     { to: "/app/team", label: "Team & roles", icon: Users, permission: "team:view" },
     { to: "/app/settings", label: "Portal & brand", icon: Settings2, permission: "settings:manage" },
     { to: "/app/audit", label: "Audit log", icon: ScrollText, permission: "audit:view" },

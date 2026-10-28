@@ -16,7 +16,7 @@
  *
  *   Password for every demo user: Demo@12345
  *
- * Portal test order: #1001 with ananya.rao@example.com
+ * Portal test order: #1029 with neha.joshi@example.com (phone 98000 00009)
  */
 import bcrypt from "bcryptjs";
 import { db } from "../src/db.js";
@@ -25,6 +25,8 @@ import { ingestOrders, recordSync } from "../src/orders/ingest.js";
 import { mapShopifyOrder } from "../src/orders/shopify.js";
 import { sandboxOrders } from "../src/orders/shopifySandbox.js";
 import type { OrderInput } from "../src/orders/schema.js";
+import { createReturn, recordCheckpoint, schedulePickup } from "../src/returns/service.js";
+import { flushNotifications } from "../src/notify/index.js";
 
 const PASSWORD = "Demo@12345";
 const DAY = 864e5;
@@ -128,45 +130,78 @@ async function main() {
   });
   await recordSync(kaveri.id, { source: "shopify", trigger: "manual", label: "Test store" }, () => ingestOrders(kaveri.id, sandboxOrders(12, 3001).map(mapShopifyOrder), "shopify"));
 
-  // Return requests as they would arrive from the portal
+  // Automation rules (Milestone 2)
+  const rules = [
+    { name: "High-value returns need a manager", priority: 10, match: "all", conditions: [{ field: "value", op: "gt", value: 10000 }], action: "require_manager", actionNote: "Return value above ₹10,000" },
+    { name: "Hold refunds for repeat returners", priority: 20, match: "all", conditions: [{ field: "customer_returns_90d", op: "gte", value: 1 }], action: "hold_refund", actionNote: null },
+    { name: "Fast-track small store-credit returns", priority: 30, match: "all", conditions: [{ field: "resolution", op: "is", value: "store_credit" }, { field: "value", op: "lte", value: 3000 }], action: "auto_approve", actionNote: null },
+    { name: "Change of mind only within 15 days", priority: 40, match: "all", conditions: [{ field: "reason", op: "is", value: "changed_mind" }, { field: "days_since_delivery", op: "gt", value: 15 }], action: "auto_reject", actionNote: "Change-of-mind returns are accepted within 15 days of delivery" },
+  ];
+  const admin = await db.user.findUniqueOrThrow({ where: { email: "admin@kaveri.test" } });
+  for (const r of rules) {
+    await db.automationRule.create({ data: { ...r, conditions: JSON.stringify(r.conditions), organizationId: kaveri.id, createdById: admin.id } });
+  }
+
+  // Return requests, created through the same service the portal uses so the
+  // eligibility engine and rules decide each one.
   const requests: { order: string; lines: { sku: string; qty?: number; reason: string; detail?: string }[]; resolution: string; days: number; note?: string }[] = [
-    { order: "1002", lines: [{ sku: "KRT-LIN-L-SND", reason: "size_issue", detail: "Shoulders are too narrow" }], resolution: "replacement", days: 1 },
-    { order: "1004", lines: [{ sku: "SNK-CNV-8-WHT", reason: "defective", detail: "Sole started peeling after the first wear" }], resolution: "refund", days: 2 },
-    { order: "1007", lines: [{ sku: "WTC-MIN-STL", reason: "not_as_described", detail: "Dial is much smaller than in the photos" }], resolution: "refund", days: 3 },
-    { order: "1010", lines: [{ sku: "SAR-CTN-MUL", reason: "wrong_item", detail: "Received a blue saree instead of mulberry" }, { sku: "SNK-CNV-8-WHT", reason: "changed_mind" }], resolution: "refund", days: 4, note: "Please arrange pickup after 5pm." },
-    { order: "1013", lines: [{ sku: "WTC-MIN-STL", reason: "changed_mind" }], resolution: "store_credit", days: 6 },
-    { order: "1015", lines: [{ sku: "BAG-TOT-TAN", reason: "defective", detail: "Strap stitching came loose" }], resolution: "replacement", days: 8 },
-    { order: "1020", lines: [{ sku: "SAR-CTN-MUL", reason: "size_issue" }], resolution: "store_credit", days: 10 },
-    { order: "1022", lines: [{ sku: "KRT-LIN-L-SND", reason: "size_issue", detail: "Runs a size small" }], resolution: "replacement", days: 12 },
-    { order: "1024", lines: [{ sku: "SNK-CNV-8-WHT", reason: "other", detail: "Gift — recipient already had the same pair" }], resolution: "store_credit", days: 13 },
+    { order: "1015", lines: [{ sku: "BAG-TOT-TAN", reason: "defective", detail: "Strap stitching came loose after a week" }], resolution: "replacement", days: 9 },
+    { order: "1018", lines: [{ sku: "JNS-SLM-32", reason: "size_issue", detail: "Waist runs small" }], resolution: "store_credit", days: 8 },
+    { order: "1016", lines: [{ sku: "SAR-CTN-MUL", reason: "wrong_item", detail: "Received a blue saree instead of mulberry" }], resolution: "refund", days: 6, note: "Please arrange pickup after 5pm." },
+    { order: "1022", lines: [{ sku: "KRT-LIN-L-SND", reason: "size_issue", detail: "Shoulders are too narrow" }], resolution: "replacement", days: 5 },
+    { order: "1023", lines: [{ sku: "DRS-MID-S-RST", reason: "not_as_described", detail: "Colour is much darker than the photos" }], resolution: "store_credit", days: 4 },
+    { order: "1020", lines: [{ sku: "SAR-CTN-MUL", reason: "size_issue" }], resolution: "refund", days: 3 },
+    { order: "1021", lines: [{ sku: "KRT-LIN-M-IND", reason: "changed_mind" }], resolution: "refund", days: 2 },
+    { order: "1024", lines: [{ sku: "SNK-CNV-8-WHT", qty: 1, reason: "defective", detail: "Sole started peeling after the first wear" }], resolution: "refund", days: 1.2 },
+    { order: "1008", lines: [{ sku: "JNS-SLM-32", reason: "changed_mind" }], resolution: "refund", days: 1 },
+    { order: "1025", lines: [{ sku: "BAG-TOT-TAN", reason: "changed_mind" }], resolution: "refund", days: 0.6 },
+    { order: "1027", lines: [{ sku: "WTC-MIN-STL", reason: "changed_mind", detail: "Dial is smaller than expected" }], resolution: "refund", days: 0.3 },
+    { order: "1003", lines: [{ sku: "DRS-MID-S-RST", reason: "defective", detail: "Seam split on the side" }], resolution: "replacement", days: 0.15 },
+    { order: "1030", lines: [{ sku: "SAR-CTN-MUL", reason: "changed_mind" }], resolution: "refund", days: 0.08 },
   ];
 
-  // Oldest first, so RMA numbers increase with time like real traffic
-  for (const r of [...requests].sort((a, b) => b.days - a.days)) {
+  const created: Record<string, string> = {};
+  for (const r of requests) {
+    const org = await db.organization.findUniqueOrThrow({ where: { id: kaveri.id } });
     const order = await db.order.findUniqueOrThrow({ where: { organizationId_orderNumber: { organizationId: kaveri.id, orderNumber: r.order } }, include: { items: true, customer: true } });
-    const lines = r.lines.map((l) => ({ ...l, item: order.items.find((i) => i.sku === l.sku) })).filter((l) => l.item);
-    if (!lines.length) continue;
-    const { nextReturnNumber } = await db.organization.update({ where: { id: kaveri.id }, data: { nextReturnNumber: { increment: 1 } } });
-    const createdAt = ago(r.days, 14);
-    await db.returnRequest.create({
-      data: {
-        organizationId: kaveri.id,
-        number: nextReturnNumber - 1,
-        orderId: order.id,
-        customerId: order.customerId,
-        status: "requested",
-        resolution: r.resolution,
-        customerNote: r.note,
-        valueMinor: lines.reduce((s, l) => s + (l.qty ?? 1) * l.item!.unitPriceMinor, 0),
-        currency: order.currency,
-        createdAt,
-        items: { create: lines.map((l) => ({ orderItemId: l.item!.id, quantity: l.qty ?? 1, reason: l.reason, reasonDetail: l.detail })) },
-        events: {
-          create: { organizationId: kaveri.id, type: "status", status: "requested", message: "Return requested through the customer portal", actorType: "customer", actorId: order.customerId, actorLabel: order.customer.name ?? order.customer.email, createdAt },
-        },
-      },
+    const lines = r.lines.map((l) => ({ l, item: order.items.find((i) => i.sku === l.sku) })).filter((x) => x.item);
+    if (!lines.length) throw new Error(`Seed: order ${r.order} has none of ${r.lines.map((l) => l.sku)}`);
+    const res = await createReturn({
+      org,
+      order,
+      lines: lines.map(({ l, item }) => ({ orderItemId: item!.id, quantity: l.qty ?? 1, reason: l.reason, reasonDetail: l.detail, photos: [] })),
+      resolution: r.resolution,
+      note: r.note,
+      channel: "portal",
+      actor: { type: "customer", id: order.customerId, label: order.customer.name ?? order.customer.email },
+      createdAt: ago(r.days, 12),
     });
+    created[r.order] = res.id;
   }
+
+  // Move a few approved returns along the pickup flow
+  const support = await db.user.findUniqueOrThrow({ where: { email: "support@kaveri.test" } });
+  const staff = { orgId: kaveri.id, actor: { type: "user" as const, id: support.id, label: support.name }, role: "support" as const, userId: support.id };
+  const tryStep = async (fn: () => Promise<unknown>) => fn().catch((e) => console.warn("seed step skipped:", e.message));
+  await tryStep(() => schedulePickup(staff, created["1018"], { courier: "Delhivery", awb: "7751093244", scheduledFor: ago(7) }));
+  await tryStep(async () => {
+    const sh = await db.shipment.findUniqueOrThrow({ where: { returnId: created["1018"] } });
+    await recordCheckpoint(kaveri.id, sh.id, { status: "picked_up", location: "Pune", source: "webhook", at: ago(6) }, { type: "system", label: "Delhivery tracking" });
+    await recordCheckpoint(kaveri.id, sh.id, { status: "delivered", location: "Bhiwandi DC", source: "webhook", at: ago(4) }, { type: "system", label: "Delhivery tracking" });
+  });
+  await tryStep(() => schedulePickup(staff, created["1022"], { courier: "Blue Dart", awb: "BD48210076IN", scheduledFor: ago(3), pickupWindow: "10am – 2pm" }));
+  await tryStep(async () => {
+    const sh = await db.shipment.findUniqueOrThrow({ where: { returnId: created["1022"] } });
+    await recordCheckpoint(kaveri.id, sh.id, { status: "picked_up", location: "Mumbai", source: "manual", at: ago(2) }, staff.actor);
+  });
+  await tryStep(() => schedulePickup(staff, created["1021"], { courier: "Xpressbees", awb: "XB1400238877", scheduledFor: ago(-1), pickupWindow: "2pm – 6pm" }));
+  // Booking happened before the courier events above; date the "scheduled" checkpoints accordingly.
+  for (const sh of await db.shipment.findMany({ where: { organizationId: kaveri.id }, include: { checkpoints: true } })) {
+    const firstMove = sh.checkpoints.filter((c) => c.status !== "scheduled").sort((a, b) => a.at.getTime() - b.at.getTime())[0];
+    const bookedAt = new Date(Math.min(Date.now(), (firstMove?.at ?? sh.scheduledFor ?? new Date()).getTime() - 864e5));
+    await db.shipmentCheckpoint.updateMany({ where: { shipmentId: sh.id, status: "scheduled" }, data: { at: bookedAt } });
+  }
+  await flushNotifications();
 
   // Second tenant: proves isolation (its data must never appear in Kaveri's console)
   const northwind = await createWorkspace("Northwind Outfitters", "northwind", [["Leo Fernandes", "admin@northwind.test", "admin"]], "#1d4d4f");

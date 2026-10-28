@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Camera, ExternalLink, ImageOff, Inbox, Mail, MessageSquareQuote, Phone, Search, UserRound } from "lucide-react";
+import { Camera, Check, ExternalLink, ImageOff, Inbox, Lock, Mail, MessageSquareQuote, Phone, Search, ShieldAlert, Truck, UserRound, X as XIcon, Zap } from "lucide-react";
 import { api } from "@/lib/api";
-import { REASONS, RESOLUTIONS, RETURN_STATUS } from "@/lib/domain";
+import { CHECKPOINTS, REASONS, RESOLUTIONS, RETURN_STATUS, SHIPMENT_STATUS } from "@/lib/domain";
 import { date, dateTime, money, relative } from "@/lib/format";
 import { useCan } from "@/lib/session";
 import { Badge, Code, ReturnStatusBadge } from "@/components/ui/Badge";
@@ -12,6 +12,8 @@ import { Card, EmptyState, PageHeader, Skeleton } from "@/components/ui/Card";
 import { Select } from "@/components/ui/Field";
 import { Drawer } from "@/components/ui/Overlay";
 import { Avatar, DefinitionList, Pagination } from "@/components/ui/misc";
+import { ReturnActions } from "@/components/returns/ReturnActions";
+import { Modal } from "@/components/ui/Overlay";
 
 type Row = {
   id: string;
@@ -28,8 +30,10 @@ type Row = {
   itemNames: string[];
   reasons: string[];
   photoCount: number;
+  flags: string[];
+  requiresManager: boolean;
 };
-type List = { total: number; page: number; pageSize: number; statusCounts: Record<string, number>; returns: Row[] };
+type List = { total: number; page: number; pageSize: number; statusCounts: Record<string, number>; escalated: number; returns: Row[] };
 
 const STATUS_FILTERS = ["", "requested", "approved", "pickup_scheduled", "in_transit", "received", "inspected", "refunded", "rejected", "closed"];
 
@@ -48,6 +52,7 @@ export function ReturnsPage() {
   const reason = params.get("reason") ?? "";
   const resolution = params.get("resolution") ?? "";
   const minValue = params.get("minValue") ?? "";
+  const queue = params.get("queue") ?? "";
   const page = Number(params.get("page") ?? 1);
   const openId = params.get("open");
   const [q, setQ] = useState(params.get("q") ?? "");
@@ -64,23 +69,23 @@ export function ReturnsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dq]);
 
-  const query = new URLSearchParams({ page: String(page), pageSize: "25", ...(status && { status }), ...(reason && { reason }), ...(resolution && { resolution }), ...(minValue && { minValue }), ...(dq && { q: dq }) });
+  const query = new URLSearchParams({ page: String(page), pageSize: "25", ...(status && { status }), ...(reason && { reason }), ...(resolution && { resolution }), ...(minValue && { minValue }), ...(queue && { queue }), ...(dq && { q: dq }) });
   const { data, isFetching } = useQuery({ queryKey: ["returns", query.toString()], queryFn: () => api<List>(`/returns?${query}`), placeholderData: keepPreviousData });
   const counts = data?.statusCounts ?? {};
   const all = Object.values(counts).reduce((s, n) => s + n, 0);
 
   return (
     <>
-      <PageHeader title="Returns" description="Every request from your customer portal, with its photos, original order and full history." />
+      <PageHeader title="Returns" description="Every request from your customer portal, with automated checks, photos, original order and full history." />
 
       <div className="flex gap-1.5 overflow-x-auto scrollbar-thin pb-1 -mx-1 px-1">
         {STATUS_FILTERS.filter((s) => !s || counts[s] || s === "requested").map((s) => {
-          const active = status === s;
+          const active = status === s && !queue;
           const meta = s ? RETURN_STATUS[s] : null;
           return (
             <button
               key={s || "all"}
-              onClick={() => update({ status: s || null })}
+              onClick={() => update({ status: s || null, queue: null })}
               className={clsx(
                 "inline-flex items-center gap-2 h-8 px-3 rounded-full border text-[13px] whitespace-nowrap transition-colors",
                 active ? "bg-ink text-white border-ink" : "bg-surface border-line text-ink-2 hover:border-line-strong",
@@ -92,6 +97,15 @@ export function ReturnsPage() {
             </button>
           );
         })}
+        {!!data?.escalated && (
+          <button
+            onClick={() => update({ queue: queue === "escalated" ? null : "escalated", status: null })}
+            className={clsx("inline-flex items-center gap-2 h-8 px-3 rounded-full border text-[13px] whitespace-nowrap transition-colors", queue === "escalated" ? "bg-ink text-white border-ink" : "bg-surface border-line text-ink-2 hover:border-line-strong")}
+          >
+            <Lock className="size-3.5" /> Manager queue
+            <span className={clsx("tabular text-[12px]", queue === "escalated" ? "text-white/60" : "text-faint")}>{data.escalated}</span>
+          </button>
+        )}
       </div>
 
       <Card className="mt-4 overflow-hidden">
@@ -170,7 +184,13 @@ export function ReturnsPage() {
                     </td>
                     <td className="px-3 text-ink-2">{RESOLUTIONS[r.resolution]?.short}</td>
                     <td className="px-3 text-right tabular">{money(r.valueMinor, r.currency)}</td>
-                    <td className="px-3"><ReturnStatusBadge status={r.status} /></td>
+                    <td className="px-3">
+                      <div className="flex items-center gap-1.5">
+                        <ReturnStatusBadge status={r.status} />
+                        {r.requiresManager && r.status === "requested" && <span title="Needs manager approval" className="grid place-items-center size-[22px] rounded-md bg-paper-2 text-ink-2"><Lock className="size-3" /></span>}
+                        {r.flags.length > 0 && <span title={r.flags.join(" · ")} className="grid place-items-center size-[22px] rounded-md bg-danger-bg text-danger"><ShieldAlert className="size-3" /></span>}
+                      </div>
+                    </td>
                     <td className="pl-3 pr-5 text-right text-muted whitespace-nowrap" title={dateTime(r.createdAt)}>{relative(r.createdAt)}</td>
                   </tr>
                 ))}
@@ -200,6 +220,12 @@ type Detail = {
   customer: { id: string; name: string | null; email: string; phone: string | null; orderCount: number; returnCount: number };
   items: { id: string; quantity: number; reason: string; reasonDetail: string | null; sku: string; name: string; variant: string | null; category: string | null; unitPriceMinor: number; photos: string[] }[];
   events: { id: string; status: string | null; message: string; actorType: string; actorLabel: string | null; createdAt: string }[];
+  eligibility: null | { outcome: string; reason: string; checks: { key: string; label: string; pass: boolean; severity: string; detail: string }[]; matchedRules: { id: string; name: string; action: string; note?: string | null }[] };
+  flags: string[];
+  requiresManager: boolean;
+  decision: null | { reason: string | null; at: string; by: string };
+  shipment: null | { courier: string; awb: string; status: string; scheduledFor: string | null; pickupWindow: string | null; checkpoints: { id: string; status: string; location: string | null; note: string | null; source: string; at: string }[] };
+  notifications: { id: string; template: string; subject: string | null; status: string; to: string; createdAt: string }[];
 };
 
 function ReturnDrawer({ id, onClose }: { id: string | null; onClose: () => void }) {
@@ -224,6 +250,21 @@ function ReturnDrawer({ id, onClose }: { id: string | null; onClose: () => void 
             <Fact label="Customer wants" value={RESOLUTIONS[data.resolution]?.short} />
             <Fact label="Days after delivery" value={deliveredDaysAgo === null ? "—" : String(Math.max(0, deliveredDaysAgo))} />
           </section>
+
+          {(data.flags.length > 0 || (data.requiresManager && data.status === "requested")) && (
+            <section className="flex flex-wrap gap-2">
+              {data.requiresManager && data.status === "requested" && (
+                <span className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-ink text-white text-[12.5px] font-medium"><Lock className="size-3.5" /> Needs manager approval</span>
+              )}
+              {data.flags.map((f) => (
+                <span key={f} className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-danger-bg text-danger text-[12.5px] font-medium"><ShieldAlert className="size-3.5" /> {f}</span>
+              ))}
+            </section>
+          )}
+
+          {data.eligibility && <EligibilityCard e={data.eligibility} decision={data.decision} status={data.status} />}
+
+          {data.shipment && <ShipmentCard s={data.shipment} />}
 
           <section>
             <SectionTitle>Items</SectionTitle>
@@ -323,8 +364,11 @@ function ReturnDrawer({ id, onClose }: { id: string | null; onClose: () => void 
               ))}
             </ol>
           </section>
+
+          {data.notifications.length > 0 && <EmailsCard items={data.notifications} />}
         </div>
       )}
+      {data && <ReturnActions ret={data} />}
       {lightbox && (
         <div className="fixed inset-0 z-[70] bg-ink/85 grid place-items-center p-6 animate-fade-in" onClick={() => setLightbox(null)}>
           <img src={lightbox} alt="Customer photo" className="max-h-full max-w-full rounded-lg shadow-2xl" />
@@ -345,4 +389,88 @@ function Fact({ label, value }: { label: string; value?: string }) {
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h3 className="mb-2 text-[12px] font-medium uppercase tracking-[0.08em] text-faint">{children}</h3>;
+}
+
+function EligibilityCard({ e, decision, status }: { e: NonNullable<Detail["eligibility"]>; decision: Detail["decision"]; status: string }) {
+  const headline =
+    e.outcome === "auto_approve" ? { icon: <Zap className="size-4" />, text: "Approved automatically", tone: "text-done" } :
+    e.outcome === "auto_reject" ? { icon: <XIcon className="size-4" />, text: "Rejected automatically", tone: "text-danger" } :
+    { icon: <UserRound className="size-4" />, text: "Sent to the review queue", tone: "text-review" };
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-start justify-between gap-3 px-4 pt-3.5 pb-3">
+        <div>
+          <div className={clsx("flex items-center gap-1.5 text-[13.5px] font-semibold", headline.tone)}>{headline.icon}{headline.text}</div>
+          <div className="text-[12.5px] text-muted mt-0.5">{e.reason}</div>
+        </div>
+        {decision && status !== "requested" && <div className="text-right text-[12px] text-muted shrink-0">Decided by <span className="text-ink-2 font-medium">{decision.by}</span><br />{dateTime(decision.at)}</div>}
+      </div>
+      <ul className="grid sm:grid-cols-2 gap-x-4 gap-y-1.5 px-4 pb-3.5">
+        {e.checks.map((c) => (
+          <li key={c.key} className="flex items-start gap-2 text-[12.5px]" title={c.detail}>
+            <span className={clsx("mt-0.5 grid place-items-center size-4 rounded-full shrink-0", c.pass ? "bg-done-bg text-done" : c.severity === "hard" ? "bg-danger-bg text-danger" : "bg-review-bg text-review")}>
+              {c.pass ? <Check className="size-2.5" strokeWidth={3.5} /> : <XIcon className="size-2.5" strokeWidth={3.5} />}
+            </span>
+            <span className="min-w-0"><span className="text-ink-2">{c.label}</span><span className="block text-faint truncate">{c.detail}</span></span>
+          </li>
+        ))}
+      </ul>
+      {e.matchedRules.length > 0 && (
+        <div className="border-t border-line bg-paper/50 px-4 py-2.5 text-[12.5px] text-muted flex flex-wrap gap-x-3 gap-y-1">
+          <span className="font-medium text-ink-2">Rules matched:</span>
+          {e.matchedRules.map((r) => <span key={r.id}>{r.name}</span>)}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function ShipmentCard({ s }: { s: NonNullable<Detail["shipment"]> }) {
+  const meta = SHIPMENT_STATUS[s.status] ?? { label: s.status, tone: "neutral" as const };
+  return (
+    <section>
+      <SectionTitle>Pickup</SectionTitle>
+      <Card className="p-4">
+        <div className="flex items-start gap-3">
+          <span className="grid place-items-center size-9 rounded-lg bg-paper-2 text-ink-2 shrink-0"><Truck className="size-4" /></span>
+          <div className="min-w-0 flex-1">
+            <div className="font-medium">{s.courier} <Code className="ml-1 text-ink">{s.awb}</Code></div>
+            <div className="text-[12.5px] text-muted">{s.scheduledFor ? `Pickup ${date(s.scheduledFor, { weekday: "short", day: "numeric", month: "short" })}${s.pickupWindow ? `, ${s.pickupWindow}` : ""}` : "Pickup date not set"}</div>
+          </div>
+          <Badge tone={meta.tone}>{meta.label}</Badge>
+        </div>
+        <ol className="mt-3 space-y-2 border-t border-line pt-3">
+          {s.checkpoints.map((c, i) => (
+            <li key={c.id} className="flex items-start gap-2.5 text-[12.5px]">
+              <span className={clsx("mt-1.5 size-1.5 rounded-full shrink-0", i === 0 ? "bg-ink" : "bg-line-strong")} />
+              <span className="flex-1">{CHECKPOINTS[c.status] ?? c.status}{c.location && <span className="text-muted"> · {c.location}</span>}</span>
+              <span className="text-faint whitespace-nowrap">{dateTime(c.at)}{c.source === "webhook" && " · auto"}</span>
+            </li>
+          ))}
+        </ol>
+      </Card>
+    </section>
+  );
+}
+
+function EmailsCard({ items }: { items: Detail["notifications"] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const { data } = useQuery({ queryKey: ["notification", open], queryFn: () => api<{ html: string; subject: string; to: string }>(`/notifications/${open}`), enabled: !!open });
+  return (
+    <section>
+      <SectionTitle>Customer emails</SectionTitle>
+      <Card className="divide-y divide-line overflow-hidden">
+        {items.map((n) => (
+          <button key={n.id} onClick={() => setOpen(n.id)} className="w-full flex items-center gap-3 px-4 h-11 text-left text-[13px] hover:bg-paper/60">
+            <Mail className="size-3.5 text-faint shrink-0" />
+            <span className="flex-1 truncate">{n.subject}</span>
+            <span className="text-[12px] text-faint whitespace-nowrap">{relative(n.createdAt)}</span>
+          </button>
+        ))}
+      </Card>
+      <Modal open={!!open} onClose={() => setOpen(null)} title={data?.subject ?? "Email"} description={data ? `To ${data.to}` : undefined} size="lg">
+        {data && <iframe title="Email preview" srcDoc={data.html} sandbox="" className="w-full h-[460px] rounded-lg border border-line bg-paper" />}
+      </Modal>
+    </section>
+  );
 }

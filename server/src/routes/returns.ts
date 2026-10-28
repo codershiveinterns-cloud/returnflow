@@ -2,8 +2,10 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db.js";
 import type { Prisma } from "../generated/prisma/client.js";
-import { notFound } from "../lib/errors.js";
+import { badRequest, notFound } from "../lib/errors.js";
 import { auth, requirePermission } from "../auth/middleware.js";
+import { parseList } from "../returns/eligibility.js";
+import { approveReturn, CHECKPOINTS, COURIERS, escalateReturn, recordCheckpoint, rejectReturn, REJECT_REASONS, schedulePickup } from "../returns/service.js";
 import { REASON_CODES, RETURN_REASONS } from "../returns/reasons.js";
 import { RESOLUTIONS, RETURN_STATUSES } from "../returns/status.js";
 import { pagination, param, rma } from "./shared.js";
@@ -16,6 +18,7 @@ const listQuery = pagination.extend({
   reason: z.enum(REASON_CODES).optional(),
   resolution: z.enum(RESOLUTIONS).optional(),
   minValue: z.coerce.number().nonnegative().optional(),
+  queue: z.enum(["escalated", "flagged"]).optional(),
 });
 
 returnsRouter.get("/", requirePermission("returns:view"), async (req, res) => {
@@ -29,6 +32,8 @@ returnsRouter.get("/", requirePermission("returns:view"), async (req, res) => {
     ...(q.resolution && { resolution: q.resolution }),
     ...(q.reason && { items: { some: { reason: q.reason } } }),
     ...(q.minValue !== undefined && { valueMinor: { gte: Math.round(q.minValue * 100) } }),
+    ...(q.queue === "escalated" && { requiresManager: true, status: "requested" }),
+    ...(q.queue === "flagged" && { NOT: { flags: "[]" } }),
     ...(term && rmaOnly && { number: Number(term) }),
     ...(term && !rmaOnly && {
       OR: [
@@ -55,11 +60,13 @@ returnsRouter.get("/", requirePermission("returns:view"), async (req, res) => {
     }),
     db.returnRequest.groupBy({ by: ["status"], where: { organizationId: orgId }, _count: true }),
   ]);
+  const escalated = await db.returnRequest.count({ where: { organizationId: orgId, status: "requested", requiresManager: true } });
   res.json({
     total,
     page: q.page,
     pageSize: q.pageSize,
     statusCounts: Object.fromEntries(statusCounts.map((s) => [s.status, s._count])),
+    escalated,
     returns: rows.map((r) => ({
       id: r.id,
       rma: rma(r.number),
@@ -75,12 +82,14 @@ returnsRouter.get("/", requirePermission("returns:view"), async (req, res) => {
       itemNames: r.items.map((i) => i.orderItem.name),
       reasons: [...new Set(r.items.map((i) => i.reason))],
       photoCount: r._count.photos,
+      flags: parseList(r.flags),
+      requiresManager: r.requiresManager,
     })),
   });
 });
 
 returnsRouter.get("/meta", requirePermission("returns:view"), (_req, res) => {
-  res.json({ statuses: RETURN_STATUSES, reasons: RETURN_REASONS, resolutions: RESOLUTIONS });
+  res.json({ statuses: RETURN_STATUSES, reasons: RETURN_REASONS, resolutions: RESOLUTIONS, rejectReasons: REJECT_REASONS, couriers: COURIERS, checkpoints: CHECKPOINTS });
 });
 
 returnsRouter.get("/:id", requirePermission("returns:view"), async (req, res) => {
@@ -93,9 +102,12 @@ returnsRouter.get("/:id", requirePermission("returns:view"), async (req, res) =>
       items: { include: { orderItem: true, photos: { select: { id: true } } } },
       photos: { where: { returnItemId: null }, select: { id: true } },
       events: { orderBy: { createdAt: "asc" } },
+      shipment: { include: { checkpoints: { orderBy: { at: "desc" } } } },
+      notifications: { orderBy: { createdAt: "desc" }, select: { id: true, template: true, subject: true, status: true, to: true, createdAt: true } },
     },
   });
   if (!r) throw notFound("Return not found");
+  const decidedBy = r.decidedById ? await db.user.findUnique({ where: { id: r.decidedById }, select: { name: true } }) : null;
   res.json({
     id: r.id,
     rma: rma(r.number),
@@ -124,5 +136,65 @@ returnsRouter.get("/:id", requirePermission("returns:view"), async (req, res) =>
     })),
     extraPhotos: r.photos.map((p) => `/api/files/photos/${p.id}`),
     events: r.events.map((e) => ({ id: e.id, type: e.type, status: e.status, message: e.message, actorType: e.actorType, actorLabel: e.actorLabel, createdAt: e.createdAt })),
+    eligibility: r.eligibility ? JSON.parse(r.eligibility) : null,
+    flags: parseList(r.flags),
+    requiresManager: r.requiresManager,
+    escalatedAt: r.escalatedAt,
+    decision: r.decidedAt ? { reason: r.decisionReason, at: r.decidedAt, by: decidedBy?.name ?? "Automation" } : null,
+    shipment: r.shipment,
+    notifications: r.notifications,
   });
+});
+
+// ───────────────────────── Workflow actions ─────────────────────────
+
+const staff = (req: Parameters<typeof auth>[0]) => {
+  const a = auth(req);
+  return { orgId: a.orgId, actor: a.actor, role: a.role, userId: a.userId, req };
+};
+
+const noteBody = z.object({ note: z.string().trim().max(500).optional() });
+
+returnsRouter.post("/:id/approve", requirePermission("returns:decide"), async (req, res) => {
+  await approveReturn(staff(req), param(req.params.id), noteBody.parse(req.body ?? {}).note);
+  res.json({ ok: true });
+});
+
+returnsRouter.post("/:id/reject", requirePermission("returns:decide"), async (req, res) => {
+  const body = z.object({ reason: z.enum(Object.keys(REJECT_REASONS) as [keyof typeof REJECT_REASONS]), note: z.string().trim().max(500).optional() }).parse(req.body);
+  if (body.reason === "other" && !body.note) throw badRequest("Describe the reason for rejecting");
+  await rejectReturn(staff(req), param(req.params.id), body.reason, body.note);
+  res.json({ ok: true });
+});
+
+returnsRouter.post("/:id/escalate", requirePermission("returns:decide"), async (req, res) => {
+  await escalateReturn(staff(req), param(req.params.id), noteBody.parse(req.body ?? {}).note);
+  res.json({ ok: true });
+});
+
+const pickupBody = z.object({
+  courier: z.string().trim().min(2, "Choose a courier").max(40),
+  awb: z.string().trim().min(4, "Enter the AWB / tracking number").max(40).regex(/^[A-Za-z0-9-]+$/, "Letters, numbers and dashes only"),
+  scheduledFor: z.coerce.date().optional(),
+  pickupWindow: z.string().trim().max(40).optional(),
+});
+
+returnsRouter.post("/:id/pickup", requirePermission("pickups:manage"), async (req, res) => {
+  await schedulePickup(staff(req), param(req.params.id), pickupBody.parse(req.body));
+  res.json({ ok: true });
+});
+
+const trackingBody = z.object({
+  status: z.enum(Object.keys(CHECKPOINTS) as [keyof typeof CHECKPOINTS]).refine((s) => s !== "scheduled", "Choose a tracking status"),
+  location: z.string().trim().max(80).optional(),
+  note: z.string().trim().max(200).optional(),
+});
+
+returnsRouter.post("/:id/tracking", requirePermission("pickups:manage"), async (req, res) => {
+  const a = auth(req);
+  const body = trackingBody.parse(req.body);
+  const sh = await db.shipment.findFirst({ where: { returnId: param(req.params.id), organizationId: a.orgId } });
+  if (!sh) throw badRequest("Schedule a pickup first");
+  await recordCheckpoint(a.orgId, sh.id, { ...body, source: "manual" }, a.actor, req);
+  res.json({ ok: true });
 });

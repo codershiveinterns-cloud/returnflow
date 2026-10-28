@@ -33,6 +33,6 @@ describe("role-based access control", () => {
   it("exposes the permission list so the UI can shape navigation", async () => {
     const agent = await login("warehouse@kaveri.test");
     const me = await agent.get("/api/auth/me");
-    expect(me.body.permissions).toEqual(["returns:view"]);
+    expect(me.body.permissions).toEqual(["returns:view", "pickups:manage"]);
   });
 });

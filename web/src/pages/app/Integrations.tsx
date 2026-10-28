@@ -21,7 +21,7 @@ type IntegrationsData = {
   lastActivity: Record<string, string>;
 };
 
-type Tab = "shopify" | "csv" | "api" | "webhook" | "history";
+type Tab = "shopify" | "csv" | "api" | "webhook" | "courier" | "history";
 
 export function SyncStatus({ status }: { status: string }) {
   const map: Record<string, [string, "done" | "review" | "danger" | "progress"]> = {
@@ -49,7 +49,8 @@ export function IntegrationsPage() {
           { id: "shopify", label: "Shopify" },
           { id: "csv", label: "CSV upload" },
           { id: "api", label: "REST API" },
-          { id: "webhook", label: "Webhook" },
+          { id: "webhook", label: "Order webhook" },
+          { id: "courier", label: "Courier tracking" },
           { id: "history", label: "Sync history" },
         ]}
       />
@@ -64,6 +65,8 @@ export function IntegrationsPage() {
           <ApiPanel data={data} />
         ) : tab === "webhook" ? (
           <WebhookPanel data={data} />
+        ) : tab === "courier" ? (
+          <CourierPanel data={data} />
         ) : (
           <HistoryPanel />
         )}
@@ -668,5 +671,45 @@ function HistoryPanel() {
         <div className="-mx-6 -my-4">{open && <ErrorList errors={open.errors} />}</div>
       </Modal>
     </Card>
+  );
+}
+
+// ------------------------------------------------------------------ Courier tracking
+
+function CourierPanel({ data }: { data: IntegrationsData }) {
+  const url = data.webhook.url.replace("/webhooks/orders/", "/webhooks/courier/");
+  const example = `POST ${url}
+X-ReturnFlow-Signature: t=<unix>,v1=<hmac>
+
+{
+  "awb": "7751093244",
+  "status": "DELIVERED",
+  "location": "Bhiwandi DC",
+  "at": "2026-10-01T14:20:00+05:30"
+}`;
+  return (
+    <div className="grid gap-6 lg:grid-cols-[1fr_1.1fr]">
+      <Card className="p-5 h-fit space-y-4">
+        <div>
+          <div className="text-[14px] font-semibold">Tracking endpoint</div>
+          <p className="mt-1 text-[13px] text-muted">Point your courier or aggregator's status webhook here. Updates are matched to returns by AWB, move the return along automatically and email the customer.</p>
+          <div className="mt-3 flex items-center gap-2 rounded-lg bg-paper border border-line px-3 h-10">
+            <code className="flex-1 truncate font-mono text-[12px]">{url}</code>
+            <CopyButton value={url} />
+          </div>
+          <p className="mt-2 text-[12.5px] text-muted">Signed with the same secret as the order webhook.</p>
+        </div>
+        <div>
+          <div className="text-[13px] font-medium text-ink-2 mb-2">Accepted statuses</div>
+          <div className="flex flex-wrap gap-1.5">
+            {["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED", "PICKUP_FAILED"].map((s) => <Code key={s} className="px-1.5 py-0.5 rounded bg-paper-2 text-[11.5px]">{s}</Code>)}
+          </div>
+        </div>
+      </Card>
+      <Card className="overflow-hidden h-fit">
+        <CardHeader title="Example update" action={<CopyButton value={example} />} />
+        <pre className="mx-5 mb-5 rounded-lg bg-[#131519] text-[#d9d5cc] text-[12px] leading-[1.6] p-4 overflow-x-auto scrollbar-thin font-mono">{example}</pre>
+      </Card>
+    </div>
   );
 }

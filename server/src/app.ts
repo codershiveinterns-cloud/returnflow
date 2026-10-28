@@ -19,6 +19,9 @@ import { returnsRouter } from "./routes/returns.js";
 import { settingsRouter } from "./routes/settings.js";
 import { teamRouter } from "./routes/team.js";
 import { webhooksRouter } from "./routes/webhooks.js";
+import { rulesRouter } from "./routes/rules.js";
+import { pickupsRouter } from "./routes/pickups.js";
+import { notificationsRouter } from "./routes/notifications.js";
 
 export function createApp() {
   const app = express();
@@ -61,6 +64,9 @@ export function createApp() {
   consoleApi.use("/settings", settingsRouter);
   consoleApi.use("/integrations", integrationsRouter);
   consoleApi.use("/audit", auditRouter);
+  consoleApi.use("/rules", rulesRouter);
+  consoleApi.use("/pickups", pickupsRouter);
+  consoleApi.use("/notifications", notificationsRouter);
   app.use("/api", consoleApi);
 
   app.use(notFoundHandler);

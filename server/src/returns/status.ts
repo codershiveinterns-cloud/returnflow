@@ -21,7 +21,7 @@ export type ReturnStatus = (typeof RETURN_STATUSES)[number];
 export const TRANSITIONS: Record<ReturnStatus, ReturnStatus[]> = {
   requested: ["approved", "rejected"],
   approved: ["pickup_scheduled", "closed"],
-  rejected: ["closed"],
+  rejected: ["approved", "closed"], // approved = manager override
   pickup_scheduled: ["in_transit", "closed"],
   in_transit: ["received"],
   received: ["inspected"],

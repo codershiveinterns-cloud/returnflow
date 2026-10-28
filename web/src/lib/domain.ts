@@ -16,6 +16,33 @@ export const RETURN_STATUS: Record<string, { label: string; tone: Tone; customer
 /** Customer-facing journey shown on the portal tracker. */
 export const JOURNEY = ["requested", "approved", "pickup_scheduled", "in_transit", "received", "inspected", "refunded"] as const;
 
+export const REJECT_REASONS: Record<string, string> = {
+  outside_window: "Outside the return window",
+  used_or_damaged: "Item shows signs of use or damage",
+  non_returnable: "Item isn't eligible for return",
+  missing_evidence: "Not enough evidence for the claim",
+  duplicate: "Duplicate request",
+  other: "Other (describe)",
+};
+
+export const COURIERS = ["Delhivery", "Blue Dart", "Ecom Express", "Xpressbees", "Shadowfax", "DTDC", "India Post", "Other"];
+
+export const CHECKPOINTS: Record<string, string> = {
+  scheduled: "Pickup scheduled",
+  picked_up: "Picked up",
+  in_transit: "In transit",
+  out_for_delivery: "Out for delivery to warehouse",
+  delivered: "Delivered to warehouse",
+  failed: "Pickup attempt failed",
+};
+
+export const SHIPMENT_STATUS: Record<string, { label: string; tone: Tone }> = {
+  scheduled: { label: "Scheduled", tone: "review" },
+  in_transit: { label: "In transit", tone: "progress" },
+  delivered: { label: "At warehouse", tone: "done" },
+  failed: { label: "Failed", tone: "danger" },
+};
+
 export const ORDER_STATUS: Record<string, { label: string; tone: Tone }> = {
   pending: { label: "Unfulfilled", tone: "neutral" },
   fulfilled: { label: "Shipped", tone: "progress" },
@@ -47,6 +74,11 @@ export type Permission =
   | "orders:view"
   | "orders:import"
   | "returns:view"
+  | "returns:decide"
+  | "returns:decide_escalated"
+  | "pickups:manage"
+  | "rules:manage"
+  | "notifications:view"
   | "integrations:manage"
   | "team:view"
   | "team:manage"

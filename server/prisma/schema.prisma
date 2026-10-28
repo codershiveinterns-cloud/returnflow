@@ -40,6 +40,11 @@ model Organization {
   supportEmail      String?
   portalHeadline    String?
   returnWindowDays  Int      @default(30)
+  // Return policy (eligibility engine)
+  nonReturnableCategories String @default("[]") // JSON string[]
+  autoApproveMaxMinor     Int    @default(500000) // auto-approve requests up to this value
+  maxReturnsPer90Days     Int    @default(3) // more than this sends the request to review
+  requirePhotoForDamage   Boolean @default(true)
   webhookSecretEnc  String
   nextReturnNumber  Int      @default(1001)
   createdAt         DateTime @default(now())
@@ -56,6 +61,9 @@ model Organization {
   apiKeys       ApiKey[]
   syncRuns      SyncRun[]
   auditLogs     AuditLog[]
+  rules         AutomationRule[]
+  shipments     Shipment[]
+  notifications Notification[]
 }
 
 model User {
@@ -163,6 +171,14 @@ model ReturnRequest {
   customerNote   String?
   valueMinor     Int
   currency       String
+  // Eligibility & decision trail
+  eligibility     String? // JSON: { checks, outcome, matchedRules }
+  flags           String   @default("[]") // JSON string[]
+  requiresManager Boolean  @default(false)
+  escalatedAt     DateTime?
+  decisionReason  String?
+  decidedById     String?
+  decidedAt       DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -172,6 +188,8 @@ model ReturnRequest {
   items        ReturnItem[]
   photos       ReturnPhoto[]
   events       ReturnEvent[]
+  shipment     Shipment?
+  notifications Notification[]
 
   @@unique([organizationId, number])
   @@index([organizationId, status, createdAt])
@@ -291,6 +309,86 @@ model AuditLog {
   createdAt      DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+}
+
+// ───────────────────────── Milestone 2 ─────────────────────────
+
+/// IF/THEN rule evaluated against every new return request, in priority order.
+model AutomationRule {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  enabled        Boolean   @default(true)
+  priority       Int       @default(100)
+  match          String    @default("all") // all | any
+  conditions     String // JSON [{ field, op, value }]
+  action         String // auto_approve | auto_reject | require_manager | flag | hold_refund
+  actionNote     String?
+  matchCount     Int       @default(0)
+  lastMatchedAt  DateTime?
+  createdById    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, priority])
+}
+
+/// Reverse pickup for a return: courier, AWB and tracking checkpoints.
+model Shipment {
+  id             String    @id @default(cuid())
+  organizationId String
+  returnId       String    @unique
+  courier        String
+  awb            String
+  status         String // scheduled | picked_up | in_transit | delivered | failed
+  scheduledFor   DateTime?
+  pickupWindow   String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization  Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  returnRequest ReturnRequest   @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  checkpoints   ShipmentCheckpoint[]
+
+  @@unique([organizationId, awb])
+}
+
+model ShipmentCheckpoint {
+  id         String   @id @default(cuid())
+  shipmentId String
+  status     String
+  location   String?
+  note       String?
+  source     String // manual | webhook
+  at         DateTime @default(now())
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId, at])
+}
+
+/// Outbound customer notification (email now; SMS/WhatsApp hook later).
+model Notification {
+  id             String    @id @default(cuid())
+  organizationId String
+  returnId       String?
+  channel        String // email | sms | whatsapp
+  to             String
+  template       String
+  subject        String?
+  body           String
+  status         String // sent | logged | failed | skipped
+  provider       String // smtp | log | webhook
+  error          String?
+  createdAt      DateTime  @default(now())
+  sentAt         DateTime?
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  returnRequest ReturnRequest? @relation(fields: [returnId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, createdAt])
 }

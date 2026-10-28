@@ -7,11 +7,52 @@ import { badRequest } from "../lib/errors.js";
 import { IMAGE_TYPES, putFile } from "../lib/storage.js";
 import { auth, requirePermission } from "../auth/middleware.js";
 import { orgPublic } from "./shared.js";
+import { parseList } from "../returns/eligibility.js";
+import type { Organization } from "../generated/prisma/client.js";
+
+const policyOf = (o: Organization) => ({
+  returnWindowDays: o.returnWindowDays,
+  nonReturnableCategories: parseList(o.nonReturnableCategories),
+  autoApproveMax: o.autoApproveMaxMinor / 100,
+  maxReturnsPer90Days: o.maxReturnsPer90Days,
+  requirePhotoForDamage: o.requirePhotoForDamage,
+});
 
 export const settingsRouter = Router();
 
 settingsRouter.get("/organization", async (req, res) => {
   res.json(orgPublic(await db.organization.findUniqueOrThrow({ where: { id: auth(req).orgId } })));
+});
+
+settingsRouter.get("/policy", async (req, res) => {
+  const org = await db.organization.findUniqueOrThrow({ where: { id: auth(req).orgId } });
+  const categories = await db.orderItem.findMany({ where: { organizationId: org.id, category: { not: null } }, distinct: ["category"], select: { category: true }, take: 100 });
+  res.json({ ...policyOf(org), knownCategories: categories.map((c) => c.category).filter(Boolean) });
+});
+
+const policyBody = z.object({
+  returnWindowDays: z.coerce.number().int().min(1, "At least 1 day").max(365),
+  nonReturnableCategories: z.array(z.string().trim().min(1).max(60)).max(50),
+  autoApproveMax: z.coerce.number().min(0).max(10_000_000),
+  maxReturnsPer90Days: z.coerce.number().int().min(1).max(100),
+  requirePhotoForDamage: z.boolean(),
+});
+
+settingsRouter.put("/policy", requirePermission("settings:manage"), async (req, res) => {
+  const a = auth(req);
+  const body = policyBody.parse(req.body);
+  const org = await db.organization.update({
+    where: { id: a.orgId },
+    data: {
+      returnWindowDays: body.returnWindowDays,
+      nonReturnableCategories: JSON.stringify([...new Set(body.nonReturnableCategories)]),
+      autoApproveMaxMinor: Math.round(body.autoApproveMax * 100),
+      maxReturnsPer90Days: body.maxReturnsPer90Days,
+      requirePhotoForDamage: body.requirePhotoForDamage,
+    },
+  });
+  await audit({ organizationId: a.orgId, actor: a.actor, action: "settings.policy_updated", entityType: "organization", entityId: a.orgId, meta: body, req });
+  res.json(policyOf(org));
 });
 
 const orgBody = z.object({

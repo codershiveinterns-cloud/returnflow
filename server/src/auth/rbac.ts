@@ -16,6 +16,11 @@ export const PERMISSIONS = [
   "orders:view",
   "orders:import",
   "returns:view",
+  "returns:decide",
+  "returns:decide_escalated",
+  "pickups:manage",
+  "rules:manage",
+  "notifications:view",
   "integrations:manage",
   "team:view",
   "team:manage",
@@ -26,9 +31,9 @@ export type Permission = (typeof PERMISSIONS)[number];
 
 const MATRIX: Record<Role, readonly Permission[]> = {
   admin: PERMISSIONS,
-  manager: ["dashboard:view", "orders:view", "returns:view", "team:view", "audit:view"],
-  support: ["dashboard:view", "orders:view", "returns:view"],
-  warehouse: ["returns:view"],
+  manager: ["dashboard:view", "orders:view", "returns:view", "returns:decide", "returns:decide_escalated", "pickups:manage", "notifications:view", "team:view", "audit:view"],
+  support: ["dashboard:view", "orders:view", "returns:view", "returns:decide", "pickups:manage", "notifications:view"],
+  warehouse: ["returns:view", "pickups:manage"],
   finance: ["dashboard:view", "orders:view", "returns:view", "audit:view"],
 };
 

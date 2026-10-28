@@ -4,7 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { AlertCircle, ArrowLeft, Check, Search } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { JOURNEY, REASONS, RESOLUTIONS, RETURN_STATUS, type Organization } from "@/lib/domain";
+import { CHECKPOINTS, JOURNEY, REASONS, RESOLUTIONS, RETURN_STATUS, type Organization } from "@/lib/domain";
 import { date, dateTime, money } from "@/lib/format";
 import { Spinner } from "@/components/ui/Spinner";
 import { BrandButton, PortalShell } from "./PortalShell";
@@ -12,7 +12,9 @@ import { BrandButton, PortalShell } from "./PortalShell";
 type Tracked = {
   rma: string; status: string; resolution: string; orderNumber: string; createdAt: string; valueMinor: number; currency: string;
   items: { name: string; variant: string | null; quantity: number; reason: string }[];
-  timeline: { status: string | null; message: string; at: string }[];
+  timeline: { status: string | null; at: string }[];
+  decision: string | null;
+  shipment: null | { courier: string; awb: string; status: string; scheduledFor: string | null; pickupWindow: string | null; checkpoints: { status: string; location: string | null; at: string }[] };
 };
 
 export function TrackPage() {
@@ -80,7 +82,22 @@ export function TrackPage() {
             <div className="p-5 sm:p-6">
               <div className="text-[13px] text-muted">Current status</div>
               <div className="text-[22px] font-semibold">{RETURN_STATUS[t.status]?.customer ?? t.status}</div>
-              <Journey status={t.status} />
+              <Journey status={t.status} decision={t.decision} />
+              {t.shipment && (
+                <div className="mt-5 rounded-xl border border-line px-4 py-3 text-[14px]">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium">{t.shipment.courier}</span>
+                    <span className="font-mono text-[13px] text-ink-2">{t.shipment.awb}</span>
+                  </div>
+                  <div className="text-[13px] text-muted mt-0.5">
+                    {t.shipment.status === "scheduled" && t.shipment.scheduledFor
+                      ? `Pickup on ${date(t.shipment.scheduledFor, { weekday: "long", day: "numeric", month: "short" })}${t.shipment.pickupWindow ? `, ${t.shipment.pickupWindow}` : ""}`
+                      : t.shipment.checkpoints[0]
+                        ? `${CHECKPOINTS[t.shipment.checkpoints[0].status]}${t.shipment.checkpoints[0].location ? ` · ${t.shipment.checkpoints[0].location}` : ""}`
+                        : ""}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="border-t border-line p-5 sm:p-6">
               <h2 className="text-[12px] font-medium uppercase tracking-[0.08em] text-faint mb-3">Items</h2>
@@ -107,7 +124,7 @@ export function TrackPage() {
                   <li key={i} className="flex gap-3 text-[14px]">
                     <span className="mt-1.5 size-2 rounded-full shrink-0" style={{ background: i === 0 ? "var(--brand)" : "var(--color-line-strong)" }} />
                     <span>
-                      {RETURN_STATUS[e.status ?? ""]?.customer ?? e.message}
+                      {RETURN_STATUS[e.status ?? ""]?.customer ?? e.status}
                       <span className="block text-[12.5px] text-muted">{dateTime(e.at)}</span>
                     </span>
                   </li>
@@ -131,11 +148,11 @@ export function TrackPage() {
   );
 }
 
-function Journey({ status }: { status: string }) {
+function Journey({ status, decision }: { status: string; decision: string | null }) {
   const rejected = status === "rejected";
   const idx = Math.max(0, JOURNEY.indexOf((status === "replaced" || status === "closed" ? "refunded" : status) as (typeof JOURNEY)[number]));
   const labels = ["Requested", "Approved", "Pickup", "In transit", "Received", "Inspected", "Resolved"];
-  if (rejected) return <p className="mt-3 text-[14px] text-danger">This request wasn't approved. Check your email for details.</p>;
+  if (rejected) return <p className="mt-3 text-[14px] text-danger">{decision ?? "This request wasn't approved. Check your email for details."}</p>;
   return (
     <ol className="mt-5 grid grid-cols-7 gap-1">
       {labels.map((l, i) => (

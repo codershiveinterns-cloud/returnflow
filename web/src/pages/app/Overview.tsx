@@ -13,7 +13,7 @@ import { SyncStatus } from "./Integrations";
 type Summary = {
   currency: string;
   portalSlug: string;
-  kpis: { orders: number; returnRate: number; returns30d: number; awaitingReview: number; openValueMinor: number };
+  kpis: { orders: number; returnRate: number; returns30d: number; awaitingReview: number; escalated: number; awaitingPickup: number; inTransit: number; openValueMinor: number };
   series: { date: string; returns: number; orders: number }[];
   reasons: { reason: string; count: number }[];
   recentReturns: { id: string; rma: string; status: string; resolution: string; valueMinor: number; currency: string; createdAt: string; orderNumber: string; customer: string; reasons: string[] }[];
@@ -40,9 +40,9 @@ export function OverviewPage() {
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-line border border-line rounded-[var(--radius-card)] overflow-hidden [&>*]:bg-surface">
-        <Kpi label="Awaiting review" value={data && number(data.kpis.awaitingReview)} accent note="Requests in the queue" to="/app/returns?status=requested" />
+        <Kpi label="Awaiting review" value={data && number(data.kpis.awaitingReview)} accent note={data?.kpis.escalated ? `${data.kpis.escalated} need a manager` : "Requests in the queue"} to="/app/returns?status=requested" />
         <Kpi label="Return rate" value={data && percent(data.kpis.returnRate)} note="Of shipped orders" />
-        <Kpi label="Returns · 30 days" value={data && number(data.kpis.returns30d)} note="Requested via portal" />
+        <Kpi label="On the way back" value={data && number(data.kpis.inTransit)} note={data ? `${data.kpis.awaitingPickup} awaiting pickup booking` : " "} to="/app/pickups" />
         <Kpi label="Open return value" value={data && money(data.kpis.openValueMinor, data.currency, { compact: true })} note="Not yet resolved" />
       </div>
 

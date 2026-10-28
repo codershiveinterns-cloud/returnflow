@@ -16,19 +16,19 @@ describe("customer return portal", () => {
   });
 
   it("only finds an order with a matching email or phone", async () => {
-    expect((await lookup("1001", "someone@else.com")).status).toBe(404);
-    expect((await lookup("9999", "ananya.rao@example.com")).status).toBe(404);
-    const byEmail = await lookup("#1001", "ANANYA.RAO@example.com");
+    expect((await lookup("1029", "someone@else.com")).status).toBe(404);
+    expect((await lookup("9999", "neha.joshi@example.com")).status).toBe(404);
+    const byEmail = await lookup("#1029", "NEHA.JOSHI@example.com");
     expect(byEmail.status).toBe(200);
     expect(byEmail.body.token).toBeTruthy();
-    const byPhone = await lookup("1001", "98000 00001");
+    const byPhone = await lookup("1029", "98000 00009");
     expect(byPhone.status).toBe(200);
     // Other tenants' orders are not reachable through this portal
     expect((await lookup("9001", "nw.ananya.rao@example.com")).status).toBe(404);
   });
 
   it("submits a return with photos end to end and staff can see it", async () => {
-    const { body } = await lookup("1001", "ananya.rao@example.com");
+    const { body } = await lookup("1029", "neha.joshi@example.com");
     const item = body.order.items[0];
     expect(item.returnableQuantity).toBe(item.quantity);
 
@@ -43,7 +43,7 @@ describe("customer return portal", () => {
     expect(res.body.valueMinor).toBe(item.unitPriceMinor);
 
     // Returnable quantity drops, so the same unit can't be returned twice
-    const again = await lookup("1001", "ananya.rao@example.com");
+    const again = await lookup("1029", "neha.joshi@example.com");
     const updated = again.body.order.items.find((i: any) => i.id === item.id);
     expect(updated.returnableQuantity).toBe(item.quantity - 1);
     expect(again.body.order.existingReturns[0].rma).toBe(res.body.rma);
@@ -51,10 +51,13 @@ describe("customer return portal", () => {
     const support = await login("support@kaveri.test");
     const list = await support.get(`/api/returns?q=${res.body.rma}`);
     expect(list.body.total).toBe(1); // an RMA search must not also match order numbers
-    expect(list.body.returns[0]).toMatchObject({ rma: res.body.rma, status: "requested", photoCount: 1, reasons: ["defective"] });
+    // Within policy, photo attached, under the auto-approve limit → approved automatically
+    expect(res.body.status).toBe("approved");
+    expect(list.body.returns[0]).toMatchObject({ rma: res.body.rma, status: "approved", photoCount: 1, reasons: ["defective"] });
     const detail = await support.get(`/api/returns/${list.body.returns[0].id}`);
     expect(detail.body.customerNote).toBe("Evening pickup please");
     expect(detail.body.events[0]).toMatchObject({ status: "requested", actorType: "customer" });
+    expect(detail.body.eligibility.outcome).toBe("auto_approve");
 
     const photoUrl = detail.body.items[0].photos[0];
     const photo = await support.get(photoUrl);
@@ -65,17 +68,17 @@ describe("customer return portal", () => {
     await other.get(photoUrl).expect(404);
 
     // Customer tracking
-    const track = await request(app).post("/api/portal/kaveri/track").send({ rma: res.body.rma.toLowerCase(), contact: "ananya.rao@example.com" });
+    const track = await request(app).post("/api/portal/kaveri/track").send({ rma: res.body.rma.toLowerCase(), contact: "neha.joshi@example.com" });
     expect(track.status).toBe(200);
-    expect(track.body.timeline[0].status).toBe("requested");
+    expect(track.body.timeline.map((t: any) => t.status)).toEqual(["requested", "approved"]);
     expect((await request(app).post("/api/portal/kaveri/track").send({ rma: res.body.rma, contact: "wrong@example.com" })).status).toBe(404);
 
-    const audit = await (await login("admin@kaveri.test")).get("/api/audit?action=return.");
+    const audit = await (await login("admin@kaveri.test")).get("/api/audit?action=return.requested");
     expect(audit.body.entries[0]).toMatchObject({ action: "return.requested", actorType: "customer" });
   });
 
   it("validates quantities, reasons, photo types and the token", async () => {
-    const { body } = await lookup("1001", "ananya.rao@example.com");
+    const { body } = await lookup("1029", "neha.joshi@example.com");
     const item = body.order.items[0];
     const post = (payload: object, token = body.token) => request(app).post("/api/portal/kaveri/returns").set("x-portal-token", token).field("payload", JSON.stringify(payload));
 

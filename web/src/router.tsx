@@ -13,6 +13,9 @@ import { AuditPage } from "./pages/app/Audit";
 import { PortalPage } from "./pages/portal/Portal";
 import { TrackPage } from "./pages/portal/Track";
 import { NotFound } from "./pages/NotFound";
+import { RulesPage } from "./pages/app/Rules";
+import { PickupsPage } from "./pages/app/Pickups";
+import { NotificationsPage } from "./pages/app/Notifications";
 import { LandingPage } from "./pages/landing/Landing";
 
 export const router = createBrowserRouter([
@@ -26,6 +29,9 @@ export const router = createBrowserRouter([
       { index: true, element: <HomeRedirect /> },
       { path: "overview", element: <RequirePermission permission="dashboard:view"><OverviewPage /></RequirePermission> },
       { path: "returns", element: <RequirePermission permission="returns:view"><ReturnsPage /></RequirePermission> },
+      { path: "rules", element: <RequirePermission permission="rules:manage"><RulesPage /></RequirePermission> },
+      { path: "pickups", element: <RequirePermission permission="pickups:manage"><PickupsPage /></RequirePermission> },
+      { path: "notifications", element: <RequirePermission permission="notifications:view"><NotificationsPage /></RequirePermission> },
       { path: "orders", element: <RequirePermission permission="orders:view"><OrdersPage /></RequirePermission> },
       { path: "integrations", element: <RequirePermission permission="integrations:manage"><IntegrationsPage /></RequirePermission> },
       { path: "team", element: <RequirePermission permission="team:view"><TeamPage /></RequirePermission> },

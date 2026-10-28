@@ -54,7 +54,7 @@ function PortalFlow({ slug, info }: { slug: string; info: PortalInfo }) {
   const [lines, setLines] = useState<Record<string, Line>>({});
   const [resolution, setResolution] = useState("");
   const [note, setNote] = useState("");
-  const [result, setResult] = useState<{ rma: string; valueMinor: number; currency: string; resolution: string } | null>(null);
+  const [result, setResult] = useState<{ rma: string; status: string; decision: string | null; valueMinor: number; currency: string; resolution: string } | null>(null);
   const topRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -77,7 +77,7 @@ function PortalFlow({ slug, info }: { slug: string; info: PortalInfo }) {
         note: note.trim() || undefined,
       }));
       selected.forEach((i) => lines[i.id].photos.forEach((p) => fd.append(`photos_${i.id}`, p, p.name)));
-      return api<{ rma: string; valueMinor: number; currency: string; resolution: string }>(`/portal/${slug}/returns`, { method: "POST", body: fd, headers: { "x-portal-token": token } });
+      return api<{ rma: string; status: string; decision: string | null; valueMinor: number; currency: string; resolution: string }>(`/portal/${slug}/returns`, { method: "POST", body: fd, headers: { "x-portal-token": token } });
     },
     onSuccess: (r) => {
       setResult(r);
@@ -102,7 +102,7 @@ function PortalFlow({ slug, info }: { slug: string; info: PortalInfo }) {
         <p className="mt-2 text-[15px] opacity-80">Returns are accepted within {org.returnWindowDays} days of delivery. It takes about two minutes.</p>
       </>
     ) : step === "done" ? (
-      <h1 className="font-display text-[30px] leading-tight">Request received</h1>
+      <h1 className="font-display text-[30px] leading-tight">{result?.status === "approved" ? "Return approved" : result?.status === "rejected" ? "We couldn't accept this return" : "Request received"}</h1>
     ) : (
       <>
         <p className="text-[13px] opacity-75">Order #{order?.orderNumber}</p>
@@ -319,15 +319,22 @@ function PortalFlow({ slug, info }: { slug: string; info: PortalInfo }) {
             <p className="mt-5 text-[14px] text-muted">Your return number</p>
             <p className="font-mono text-[28px] font-semibold tracking-tight">{result.rma}</p>
             <p className="mt-3 text-[14.5px] text-ink-2 max-w-sm mx-auto">
-              Thanks{order?.customerName ? `, ${order.customerName.split(" ")[0]}` : ""}. We've received your request and will email you once it's reviewed — usually within one business day.
+              {result.status === "approved"
+                ? `Good news${order?.customerName ? `, ${order.customerName.split(" ")[0]}` : ""} — your return is approved. We'll email you the pickup date and tracking number shortly.`
+                : result.status === "rejected"
+                  ? result.decision ?? "This return doesn't meet our return policy."
+                  : `Thanks${order?.customerName ? `, ${order.customerName.split(" ")[0]}` : ""}. We've received your request and will email you once it's reviewed — usually within one business day.`}
             </p>
             <ol className="mt-6 text-left max-w-sm mx-auto space-y-3">
-              {["We review your request", "A courier picks up the parcel", "We inspect the items", result.resolution === "replacement" ? "Your replacement ships" : result.resolution === "store_credit" ? "Store credit is added" : "Your refund is issued"].map((t, i) => (
-                <li key={t} className="flex items-center gap-3 text-[14px]">
-                  <span className={clsx("grid place-items-center size-6 rounded-full text-[12px] font-semibold shrink-0", i === 0 ? "" : "bg-paper-2 text-muted")} style={i === 0 ? { background: "var(--brand)", color: "var(--brand-fg)" } : undefined}>{i + 1}</span>
-                  <span className={i === 0 ? "font-medium" : "text-muted"}>{t}</span>
-                </li>
-              ))}
+              {result.status !== "rejected" && [result.status === "approved" ? "Approved" : "We review your request", "A courier picks up the parcel", "We inspect the items", result.resolution === "replacement" ? "Your replacement ships" : result.resolution === "store_credit" ? "Store credit is added" : "Your refund is issued"].map((t, i) => {
+                const doneStep = result.status === "approved" && i === 0;
+                return (
+                  <li key={t} className="flex items-center gap-3 text-[14px]">
+                    <span className={clsx("grid place-items-center size-6 rounded-full text-[12px] font-semibold shrink-0", i === 0 ? "" : "bg-paper-2 text-muted")} style={i === 0 ? { background: "var(--brand)", color: "var(--brand-fg)" } : undefined}>{doneStep ? <Check className="size-3.5" strokeWidth={3} /> : i + 1}</span>
+                    <span className={i === 0 ? "font-medium" : "text-muted"}>{t}</span>
+                  </li>
+                );
+              })}
             </ol>
             <div className="mt-8 flex flex-col sm:flex-row gap-2 justify-center">
               <Link to={`/r/${slug}/track?rma=${result.rma}`}><BrandButton className="w-full">Track this return</BrandButton></Link>

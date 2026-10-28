@@ -2,7 +2,6 @@ import { Router } from "express";
 import multer from "multer";
 import { z } from "zod";
 import { db } from "../db.js";
-import { audit } from "../lib/audit.js";
 import { badRequest, notFound, unauthorized } from "../lib/errors.js";
 import { rateLimit } from "../lib/rateLimit.js";
 import { IMAGE_TYPES, putFile } from "../lib/storage.js";
@@ -10,6 +9,7 @@ import { issuePortalToken, readPortalToken } from "../auth/session.js";
 import { normalizeOrderNumber } from "../orders/schema.js";
 import { REASON_CODES, RETURN_REASONS } from "../returns/reasons.js";
 import { RESOLUTIONS } from "../returns/status.js";
+import { createReturn } from "../returns/service.js";
 import { orgPublic, param, rma } from "./shared.js";
 
 /**
@@ -162,41 +162,26 @@ portalRouter.post("/:slug/returns", photoUpload.any(), async (req, res) => {
     stored.set(itemId, await Promise.all(list.map(async (f) => ({ key: await putFile(org.id, "returns", f.buffer, f.mimetype), mime: f.mimetype, size: f.size }))));
   }
 
-  const valueMinor = body.items.reduce((s, l) => s + l.quantity * byId.get(l.orderItemId)!.unitPriceMinor, 0);
-  const created = await db.$transaction(async (tx) => {
-    const { nextReturnNumber } = await tx.organization.update({ where: { id: org.id }, data: { nextReturnNumber: { increment: 1 } }, select: { nextReturnNumber: true } });
-    const number = nextReturnNumber - 1;
-    const ret = await tx.returnRequest.create({
-      data: {
-        organizationId: org.id,
-        number,
-        orderId: order.id,
-        customerId: order.customerId,
-        status: "requested",
-        resolution: body.resolution,
-        channel: "portal",
-        customerNote: body.note || null,
-        valueMinor,
-        currency: order.currency,
-      },
-    });
-    for (const line of body.items) {
-      const item = await tx.returnItem.create({
-        data: { returnId: ret.id, orderItemId: line.orderItemId, quantity: line.quantity, reason: line.reason, reasonDetail: line.reasonDetail || null },
-      });
-      for (const p of stored.get(line.orderItemId) ?? []) {
-        await tx.returnPhoto.create({ data: { organizationId: org.id, returnId: ret.id, returnItemId: item.id, storageKey: p.key, mimeType: p.mime, sizeBytes: p.size, uploadedBy: "customer" } });
-      }
-    }
-    const customerLabel = order.customer.name ?? order.customer.email;
-    await tx.returnEvent.create({
-      data: { organizationId: org.id, returnId: ret.id, type: "status", status: "requested", message: "Return requested through the customer portal", actorType: "customer", actorId: order.customerId, actorLabel: customerLabel },
-    });
-    await audit({ organizationId: org.id, actor: { type: "customer", id: order.customerId, label: customerLabel }, action: "return.requested", entityType: "return", entityId: ret.id, meta: { rma: rma(number), order: order.orderNumber, valueMinor }, req }, tx);
-    return ret;
+  const result = await createReturn({
+    org,
+    order,
+    lines: body.items.map((l) => ({ ...l, photos: stored.get(l.orderItemId) ?? [] })),
+    resolution: body.resolution,
+    note: body.note,
+    channel: "portal",
+    actor: { type: "customer", id: order.customerId, label: order.customer.name ?? order.customer.email },
+    req,
   });
 
-  res.status(201).json({ rma: rma(created.number), status: created.status, createdAt: created.createdAt, valueMinor, currency: order.currency, resolution: created.resolution });
+  res.status(201).json({
+    rma: result.rma,
+    status: result.status,
+    valueMinor: result.valueMinor,
+    currency: order.currency,
+    resolution: body.resolution,
+    // Customers see why a request was declined; review reasons stay internal.
+    decision: result.status === "rejected" ? result.reason : null,
+  });
 });
 
 const trackQuery = z.object({
@@ -216,6 +201,7 @@ portalRouter.post("/:slug/track", lookupLimiter, async (req, res) => {
           order: { select: { orderNumber: true } },
           items: { include: { orderItem: { select: { name: true, variant: true, imageUrl: true } } } },
           events: { where: { type: "status" }, orderBy: { createdAt: "asc" } },
+          shipment: { include: { checkpoints: { orderBy: { at: "desc" } } } },
         },
       })
     : null;
@@ -229,6 +215,15 @@ portalRouter.post("/:slug/track", lookupLimiter, async (req, res) => {
     valueMinor: ret.valueMinor,
     currency: ret.currency,
     items: ret.items.map((i) => ({ name: i.orderItem.name, variant: i.orderItem.variant, quantity: i.quantity, reason: i.reason })),
-    timeline: ret.events.map((e) => ({ status: e.status, message: e.message, at: e.createdAt })),
+    timeline: ret.events.map((e) => ({ status: e.status, at: e.createdAt })),
+    decision: ret.status === "rejected" ? ret.decisionReason : null,
+    shipment: ret.shipment && {
+      courier: ret.shipment.courier,
+      awb: ret.shipment.awb,
+      status: ret.shipment.status,
+      scheduledFor: ret.shipment.scheduledFor,
+      pickupWindow: ret.shipment.pickupWindow,
+      checkpoints: ret.shipment.checkpoints.map((c) => ({ status: c.status, location: c.location, at: c.at })),
+    },
   });
 });
