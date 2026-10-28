@@ -24,7 +24,7 @@ export const TRANSITIONS: Record<ReturnStatus, ReturnStatus[]> = {
   rejected: ["approved", "closed"], // approved = manager override
   pickup_scheduled: ["in_transit", "closed"],
   in_transit: ["received"],
-  received: ["inspected"],
+  received: ["inspected", "refunded", "replaced"], // early resolution when the refund isn't on hold
   inspected: ["refunded", "replaced", "closed"],
   refunded: ["closed"],
   replaced: ["closed"],

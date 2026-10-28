@@ -15,6 +15,7 @@ export default defineConfig({
       PUBLIC_API_URL: "http://localhost:4000",
       APP_URL: "http://localhost:5173",
       SHOPIFY_API_BASE: "http://127.0.0.1:47899",
+      RAZORPAY_API_BASE: "http://127.0.0.1:47898",
     },
   },
 });

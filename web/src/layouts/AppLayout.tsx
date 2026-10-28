@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { LayoutGrid, Undo2, ShoppingBag, Plug, Users, Settings2, ScrollText, ExternalLink, LogOut, Menu, X, ChevronsUpDown, Lock, Truck, Workflow, Mail } from "lucide-react";
+import { LayoutGrid, Undo2, ShoppingBag, Plug, Users, Settings2, ScrollText, ExternalLink, LogOut, Menu, X, ChevronsUpDown, Lock, Truck, Workflow, Mail, ClipboardCheck, Wallet, Boxes, ShieldAlert } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Permission } from "@/lib/domain";
 import { useCan, useSession, useSignOut } from "@/lib/session";
@@ -50,6 +50,10 @@ export function AppLayout() {
     { to: "/app/overview", label: "Overview", icon: LayoutGrid, permission: "dashboard:view" },
     { to: "/app/returns", label: "Returns", icon: Undo2, permission: "returns:view", badge: pending.data?.total },
     { to: "/app/pickups", label: "Pickups", icon: Truck, permission: "pickups:manage" },
+    { to: "/app/inspection", label: "Inspection", icon: ClipboardCheck, permission: "inspection:perform" },
+    { to: "/app/refunds", label: "Refunds", icon: Wallet, permission: "refunds:issue" },
+    { to: "/app/inventory", label: "Inventory", icon: Boxes, permission: "inventory:view" },
+    { to: "/app/risk", label: "Risk", icon: ShieldAlert, permission: "risk:view" },
     { to: "/app/orders", label: "Orders", icon: ShoppingBag, permission: "orders:view" },
   ];
   const workspace: NavItem[] = [

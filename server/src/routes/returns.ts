@@ -5,6 +5,9 @@ import type { Prisma } from "../generated/prisma/client.js";
 import { badRequest, notFound } from "../lib/errors.js";
 import { auth, requirePermission } from "../auth/middleware.js";
 import { parseList } from "../returns/eligibility.js";
+import multer from "multer";
+import { IMAGE_TYPES, putFile } from "../lib/storage.js";
+import { canResolve, markReceived, recordInspection, resolveReturn, suggestCondition } from "../returns/resolution.js";
 import { approveReturn, CHECKPOINTS, COURIERS, escalateReturn, recordCheckpoint, rejectReturn, REJECT_REASONS, schedulePickup } from "../returns/service.js";
 import { REASON_CODES, RETURN_REASONS } from "../returns/reasons.js";
 import { RESOLUTIONS, RETURN_STATUSES } from "../returns/status.js";
@@ -84,6 +87,8 @@ returnsRouter.get("/", requirePermission("returns:view"), async (req, res) => {
       photoCount: r._count.photos,
       flags: parseList(r.flags),
       requiresManager: r.requiresManager,
+      riskScore: r.riskScore,
+      riskLevel: r.riskLevel,
     })),
   });
 });
@@ -97,9 +102,11 @@ returnsRouter.get("/:id", requirePermission("returns:view"), async (req, res) =>
   const r = await db.returnRequest.findFirst({
     where: { id: param(req.params.id), organizationId: orgId },
     include: {
-      order: { select: { id: true, orderNumber: true, placedAt: true, deliveredAt: true, status: true, paymentMethod: true, totalMinor: true, source: true } },
+      order: { select: { id: true, orderNumber: true, placedAt: true, deliveredAt: true, status: true, paymentMethod: true, paymentRef: true, totalMinor: true, source: true } },
       customer: { include: { _count: { select: { orders: true, returns: true } } } },
-      items: { include: { orderItem: true, photos: { select: { id: true } } } },
+      items: { include: { orderItem: true, photos: { select: { id: true, uploadedBy: true } }, inspection: true } },
+      refunds: { orderBy: { createdAt: "desc" } },
+      inventory: { orderBy: { createdAt: "desc" } },
       photos: { where: { returnItemId: null }, select: { id: true } },
       events: { orderBy: { createdAt: "asc" } },
       shipment: { include: { checkpoints: { orderBy: { at: "desc" } } } },
@@ -132,7 +139,19 @@ returnsRouter.get("/:id", requirePermission("returns:view"), async (req, res) =>
       category: i.orderItem.category,
       unitPriceMinor: i.orderItem.unitPriceMinor,
       imageUrl: i.orderItem.imageUrl,
-      photos: i.photos.map((p) => `/api/files/photos/${p.id}`),
+      photos: i.photos.filter((p) => p.uploadedBy === "customer").map((p) => `/api/files/photos/${p.id}`),
+      inspectionPhotos: i.photos.filter((p) => p.uploadedBy === "staff").map((p) => `/api/files/photos/${p.id}`),
+      ai: i.aiReason ? { reason: i.aiReason, summary: i.aiSummary, confidence: i.aiConfidence, source: i.aiSource } : null,
+      inspection: i.inspection && {
+        checklist: JSON.parse(i.inspection.checklist),
+        grade: i.inspection.grade,
+        disposition: i.inspection.disposition,
+        notes: i.inspection.notes,
+        mismatch: i.inspection.mismatch,
+        aiSuggestion: i.inspection.aiSuggestion ? JSON.parse(i.inspection.aiSuggestion) : null,
+        inspectorName: i.inspection.inspectorName,
+        createdAt: i.inspection.createdAt,
+      },
     })),
     extraPhotos: r.photos.map((p) => `/api/files/photos/${p.id}`),
     events: r.events.map((e) => ({ id: e.id, type: e.type, status: e.status, message: e.message, actorType: e.actorType, actorLabel: e.actorLabel, createdAt: e.createdAt })),
@@ -143,6 +162,12 @@ returnsRouter.get("/:id", requirePermission("returns:view"), async (req, res) =>
     decision: r.decidedAt ? { reason: r.decisionReason, at: r.decidedAt, by: decidedBy?.name ?? "Automation" } : null,
     shipment: r.shipment,
     notifications: r.notifications,
+    risk: r.riskScore === null ? null : { score: r.riskScore, level: r.riskLevel, factors: JSON.parse(r.riskFactors) },
+    holdRefund: r.holdRefund,
+    refunds: r.refunds,
+    inventory: r.inventory,
+    resolvable: canResolve(r),
+    paymentRef: r.order.paymentRef ?? null,
   });
 });
 
@@ -197,4 +222,68 @@ returnsRouter.post("/:id/tracking", requirePermission("pickups:manage"), async (
   if (!sh) throw badRequest("Schedule a pickup first");
   await recordCheckpoint(a.orgId, sh.id, { ...body, source: "manual" }, a.actor, req);
   res.json({ ok: true });
+});
+
+// ───────────────────────── Milestone 3: receive, inspect, resolve ─────────────────────────
+
+returnsRouter.post("/:id/receive", requirePermission("inspection:perform"), async (req, res) => {
+  await markReceived(staff(req), param(req.params.id));
+  res.json({ ok: true });
+});
+
+const checklistSchema = z.object({
+  packaging: z.enum(["pass", "fail"]),
+  tags: z.enum(["pass", "fail"]),
+  damage: z.enum(["pass", "fail"]),
+  usage: z.enum(["pass", "fail"]),
+});
+
+returnsRouter.post("/:id/items/:itemId/analyze", requirePermission("inspection:perform"), async (req, res) => {
+  const { checklist } = z.object({ checklist: checklistSchema }).parse(req.body);
+  res.json(await suggestCondition(auth(req).orgId, param(req.params.id), param(req.params.itemId), checklist));
+});
+
+const inspectionUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: 6 },
+  fileFilter: (_req, file, cb) => (IMAGE_TYPES.includes(file.mimetype) && file.mimetype !== "image/svg+xml" ? cb(null, true) : cb(badRequest("Photos must be JPG, PNG, WEBP or HEIC"))),
+});
+
+const inspectionBody = z.object({
+  checklist: checklistSchema,
+  grade: z.enum(["A", "B", "C", "D"]),
+  disposition: z.enum(["restock", "refurbish", "damaged", "dispose"]),
+  notes: z.string().trim().max(1000).optional(),
+  aiSuggestion: z
+    .object({ grade: z.enum(["A", "B", "C", "D"]), disposition: z.string(), mismatch: z.boolean(), explanation: z.string().max(1000), source: z.enum(["claude", "rules"]) })
+    .nullable()
+    .optional(),
+});
+
+returnsRouter.post("/:id/items/:itemId/inspect", requirePermission("inspection:perform"), inspectionUpload.array("photos", 6), async (req, res) => {
+  const a = auth(req);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(String(req.body?.payload ?? ""));
+  } catch {
+    throw badRequest("Malformed request");
+  }
+  const body = inspectionBody.parse(raw);
+  const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+  const photos = await Promise.all(files.map(async (f) => ({ key: await putFile(a.orgId, "inspections", f.buffer, f.mimetype), mime: f.mimetype, size: f.size })));
+  const result = await recordInspection(staff(req), param(req.params.id), param(req.params.itemId), { ...body, aiSuggestion: body.aiSuggestion as never, photos });
+  res.json(result);
+});
+
+const resolveBody = z.object({
+  kind: z.enum(["refund", "store_credit", "replacement"]),
+  method: z.enum(["razorpay", "manual", "store_credit", "replacement"]),
+  amount: z.coerce.number().nonnegative().optional(),
+  reference: z.string().trim().max(80).optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
+returnsRouter.post("/:id/resolve", requirePermission("refunds:issue"), async (req, res) => {
+  const refund = await resolveReturn(staff(req), param(req.params.id), resolveBody.parse(req.body));
+  res.json(refund);
 });

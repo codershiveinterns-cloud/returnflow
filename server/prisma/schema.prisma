@@ -64,6 +64,9 @@ model Organization {
   rules         AutomationRule[]
   shipments     Shipment[]
   notifications Notification[]
+  inspections   Inspection[]
+  refunds       Refund[]
+  inventory     InventoryMovement[]
 }
 
 model User {
@@ -122,6 +125,7 @@ model Order {
   paymentMethod   String    @default("prepaid") // prepaid | cod
   currency        String
   totalMinor      Int
+  paymentRef      String? // gateway payment id (e.g. Razorpay pay_…), used for refunds
   placedAt        DateTime
   deliveredAt     DateTime?
   shippingAddress String? // JSON
@@ -179,6 +183,12 @@ model ReturnRequest {
   decisionReason  String?
   decidedById     String?
   decidedAt       DateTime?
+  // Risk & resolution (Milestone 3)
+  riskScore       Int?
+  riskLevel       String? // low | medium | high
+  riskFactors     String   @default("[]") // JSON [{ label, points }]
+  holdRefund      Boolean  @default(false)
+  resolvedAt      DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -190,6 +200,9 @@ model ReturnRequest {
   events       ReturnEvent[]
   shipment     Shipment?
   notifications Notification[]
+  inspections  Inspection[]
+  refunds      Refund[]
+  inventory    InventoryMovement[]
 
   @@unique([organizationId, number])
   @@index([organizationId, status, createdAt])
@@ -202,10 +215,16 @@ model ReturnItem {
   quantity     Int
   reason       String // see src/returns/reasons.ts
   reasonDetail String?
+  // AI-assisted reason analysis
+  aiReason     String? // classified reason code
+  aiSummary    String?
+  aiConfidence Float?
+  aiSource     String? // claude | rules
 
   returnRequest ReturnRequest @relation(fields: [returnId], references: [id], onDelete: Cascade)
   orderItem     OrderItem     @relation(fields: [orderItemId], references: [id])
   photos        ReturnPhoto[]
+  inspection    Inspection?
 }
 
 model ReturnPhoto {
@@ -391,4 +410,74 @@ model Notification {
   returnRequest ReturnRequest? @relation(fields: [returnId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, createdAt])
+}
+
+// ───────────────────────── Milestone 3 ─────────────────────────
+
+/// Warehouse inspection of one returned line.
+model Inspection {
+  id             String   @id @default(cuid())
+  organizationId String
+  returnId       String
+  returnItemId   String   @unique
+  checklist      String // JSON { packaging, tags, damage, usage: "pass" | "fail" }
+  grade          String // A | B | C | D
+  disposition    String // restock | refurbish | damaged | dispose
+  notes          String?
+  aiSuggestion   String? // JSON { grade, disposition, mismatch, explanation, source }
+  mismatch       Boolean  @default(false)
+  inspectorId    String?
+  inspectorName  String?
+  createdAt      DateTime @default(now())
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  returnRequest ReturnRequest @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  returnItem    ReturnItem    @relation(fields: [returnItemId], references: [id], onDelete: Cascade)
+}
+
+/// Money (or goods) going back to the customer.
+model Refund {
+  id             String    @id @default(cuid())
+  organizationId String
+  returnId       String
+  kind           String // refund | store_credit | replacement
+  method         String // razorpay | manual | store_credit | replacement
+  amountMinor    Int
+  currency       String
+  status         String // processing | succeeded | failed
+  reference      String? // gateway refund id, credit code, replacement order number, bank/UPI ref
+  gatewayMode    String? // live | test
+  note           String?
+  error          String?
+  createdById    String?
+  createdByName  String?
+  createdAt      DateTime  @default(now())
+  processedAt    DateTime?
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  returnRequest ReturnRequest @relation(fields: [returnId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+}
+
+/// Stock effect of an inspected item, and whether it was synced to the store.
+model InventoryMovement {
+  id             String   @id @default(cuid())
+  organizationId String
+  returnId       String
+  returnItemId   String?
+  sku            String
+  name           String
+  quantity       Int
+  disposition    String // restock | refurbish | damaged | dispose
+  syncStatus     String // synced | failed | not_required | not_connected
+  syncTarget     String?
+  syncMessage    String?
+  createdAt      DateTime @default(now())
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  returnRequest ReturnRequest @relation(fields: [returnId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, sku])
 }

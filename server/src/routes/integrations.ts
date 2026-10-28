@@ -10,6 +10,8 @@ import { ingestOrders, recordSync } from "../orders/ingest.js";
 import { fetchOrders, mapShopifyOrder, normalizeShopDomain, verifyShop, type ShopifyConfig } from "../orders/shopify.js";
 import { sandboxOrders } from "../orders/shopifySandbox.js";
 import { param } from "./shared.js";
+import { verifyRazorpay, type RazorpayConfig } from "../payments/razorpay.js";
+import { aiProvider, MODEL } from "../ai/index.js";
 
 export const integrationsRouter = Router();
 integrationsRouter.use(requirePermission("integrations:manage"));
@@ -18,9 +20,10 @@ const mask = (s: string) => `${s.slice(0, 10)}${"•".repeat(12)}${s.slice(-4)}`
 
 integrationsRouter.get("/", async (req, res) => {
   const { orgId } = auth(req);
-  const [org, shopify, keys, lastRuns] = await Promise.all([
+  const [org, shopify, razorpay, keys, lastRuns] = await Promise.all([
     db.organization.findUniqueOrThrow({ where: { id: orgId } }),
     db.integration.findUnique({ where: { organizationId_provider: { organizationId: orgId, provider: "shopify" } } }),
+    db.integration.findUnique({ where: { organizationId_provider: { organizationId: orgId, provider: "razorpay" } } }),
     db.apiKey.findMany({ where: { organizationId: orgId }, orderBy: { createdAt: "desc" } }),
     db.syncRun.groupBy({ by: ["source"], where: { organizationId: orgId }, _max: { startedAt: true } }),
   ]);
@@ -46,6 +49,13 @@ integrationsRouter.get("/", async (req, res) => {
       keys: keys.map((k) => ({ id: k.id, name: k.name, prefix: `rf_${k.prefix}_`, lastUsedAt: k.lastUsedAt, revokedAt: k.revokedAt, createdAt: k.createdAt })),
     },
     lastActivity: Object.fromEntries(lastRuns.map((r) => [r.source, r._max.startedAt])),
+    razorpay: razorpay && {
+      mode: razorpay.mode,
+      displayName: razorpay.displayName,
+      keyId: razorpay.mode === "sandbox" ? null : `${decryptJson<RazorpayConfig>(razorpay.configEnc).keyId.slice(0, 12)}••••`,
+      createdAt: razorpay.createdAt,
+    },
+    ai: { provider: aiProvider(), model: aiProvider() === "claude" ? MODEL : null },
   });
 });
 
@@ -167,4 +177,42 @@ integrationsRouter.get("/sync-runs", async (req, res) => {
   const { orgId } = auth(req);
   const runs = await db.syncRun.findMany({ where: { organizationId: orgId }, orderBy: { startedAt: "desc" }, take: 50 });
   res.json({ runs: runs.map((r) => ({ ...r, errors: r.errors ? JSON.parse(r.errors) : [] })) });
+});
+
+// ---------- Razorpay (refunds) ----------
+
+const razorpayBody = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("live"), keyId: z.string().trim().regex(/^rzp_(live|test)_[A-Za-z0-9]+$/, "Key ID looks like rzp_live_… or rzp_test_…"), keySecret: z.string().trim().min(10, "Paste the key secret") }),
+  z.object({ mode: z.literal("sandbox") }),
+]);
+
+integrationsRouter.post("/razorpay", async (req, res) => {
+  const a = auth(req);
+  const body = razorpayBody.parse(req.body);
+  let cfg: RazorpayConfig = { keyId: "test", keySecret: "test" };
+  let displayName = "Razorpay · test mode";
+  if (body.mode === "live") {
+    cfg = { keyId: body.keyId, keySecret: body.keySecret };
+    try {
+      const v = await verifyRazorpay(cfg);
+      displayName = v.mode === "live" ? "Razorpay" : "Razorpay · test keys";
+    } catch (err) {
+      throw badRequest(err instanceof Error ? err.message : "Could not reach Razorpay");
+    }
+  }
+  const data = { mode: body.mode, displayName, configEnc: encryptJson(cfg), status: "connected", lastError: null };
+  const row = await db.integration.upsert({
+    where: { organizationId_provider: { organizationId: a.orgId, provider: "razorpay" } },
+    create: { ...data, organizationId: a.orgId, provider: "razorpay" },
+    update: data,
+  });
+  await audit({ organizationId: a.orgId, actor: a.actor, action: "integration.razorpay_connected", entityType: "integration", entityId: row.id, meta: { mode: body.mode }, req });
+  res.status(201).json({ displayName });
+});
+
+integrationsRouter.delete("/razorpay", async (req, res) => {
+  const a = auth(req);
+  const deleted = await db.integration.deleteMany({ where: { organizationId: a.orgId, provider: "razorpay" } });
+  if (deleted.count) await audit({ organizationId: a.orgId, actor: a.actor, action: "integration.razorpay_disconnected", req });
+  res.status(204).end();
 });

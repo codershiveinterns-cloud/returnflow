@@ -16,6 +16,10 @@ import { NotFound } from "./pages/NotFound";
 import { RulesPage } from "./pages/app/Rules";
 import { PickupsPage } from "./pages/app/Pickups";
 import { NotificationsPage } from "./pages/app/Notifications";
+import { InspectionQueuePage, InspectReturnPage } from "./pages/app/Inspection";
+import { RefundsPage } from "./pages/app/Refunds";
+import { InventoryPage } from "./pages/app/Inventory";
+import { RiskPage } from "./pages/app/Risk";
 import { LandingPage } from "./pages/landing/Landing";
 
 export const router = createBrowserRouter([
@@ -31,6 +35,11 @@ export const router = createBrowserRouter([
       { path: "returns", element: <RequirePermission permission="returns:view"><ReturnsPage /></RequirePermission> },
       { path: "rules", element: <RequirePermission permission="rules:manage"><RulesPage /></RequirePermission> },
       { path: "pickups", element: <RequirePermission permission="pickups:manage"><PickupsPage /></RequirePermission> },
+      { path: "inspection", element: <RequirePermission permission="inspection:perform"><InspectionQueuePage /></RequirePermission> },
+      { path: "inspection/:id", element: <RequirePermission permission="inspection:perform"><InspectReturnPage /></RequirePermission> },
+      { path: "refunds", element: <RequirePermission permission="refunds:issue"><RefundsPage /></RequirePermission> },
+      { path: "inventory", element: <RequirePermission permission="inventory:view"><InventoryPage /></RequirePermission> },
+      { path: "risk", element: <RequirePermission permission="risk:view"><RiskPage /></RequirePermission> },
       { path: "notifications", element: <RequirePermission permission="notifications:view"><NotificationsPage /></RequirePermission> },
       { path: "orders", element: <RequirePermission permission="orders:view"><OrdersPage /></RequirePermission> },
       { path: "integrations", element: <RequirePermission permission="integrations:manage"><IntegrationsPage /></RequirePermission> },

@@ -7,6 +7,8 @@ import { queueNotification } from "../notify/index.js";
 import type { TemplateKey, TemplateVars } from "../notify/templates.js";
 import { rma } from "../routes/shared.js";
 import { evaluate, type Evaluation } from "./eligibility.js";
+import { scoreRisk } from "./risk.js";
+import { classifyReason } from "../ai/index.js";
 import type { RuleContext } from "./rules.js";
 import { TRANSITIONS, type ReturnStatus } from "./status.js";
 
@@ -25,7 +27,7 @@ const eventActor = (a: Actor) => ({
   actorLabel: a.label,
 });
 
-async function moveTo(tx: Tx, ret: Pick<ReturnRequest, "id" | "status" | "organizationId">, to: ReturnStatus, actor: Actor, message: string, data: Record<string, unknown> = {}) {
+export async function moveTo(tx: Tx, ret: Pick<ReturnRequest, "id" | "status" | "organizationId">, to: ReturnStatus, actor: Actor, message: string, data: Record<string, unknown> = {}) {
   const allowed = TRANSITIONS[ret.status as ReturnStatus] ?? [];
   if (!allowed.includes(to)) throw badRequest(`A return can't move from “${ret.status.replace(/_/g, " ")}” to “${to.replace(/_/g, " ")}”`);
   await tx.returnRequest.update({ where: { id: ret.id }, data: { status: to, ...data } });
@@ -57,10 +59,27 @@ export async function createReturn(input: {
   const itemsById = new Map(order.items.map((i) => [i.id, i]));
   const valueMinor = lines.reduce((s, l) => s + l.quantity * itemsById.get(l.orderItemId)!.unitPriceMinor, 0);
 
-  const [history, rules] = await Promise.all([
-    db.returnRequest.count({ where: { organizationId: org.id, customerId: order.customerId, status: { not: "rejected" }, createdAt: { gte: new Date(now.getTime() - 90 * DAY), lte: now } } }),
+  const [prior, rules] = await Promise.all([
+    db.returnRequest.findMany({
+      where: { organizationId: org.id, customerId: order.customerId, status: { not: "rejected" }, createdAt: { gte: new Date(now.getTime() - 90 * DAY), lte: now } },
+      select: { valueMinor: true, items: { select: { reason: true } } },
+    }),
     db.automationRule.findMany({ where: { organizationId: org.id, enabled: true }, orderBy: [{ priority: "asc" }, { createdAt: "asc" }] }),
   ]);
+  const history = prior.length;
+  const daysSinceDelivery = Math.max(0, Math.floor((now.getTime() - (order.deliveredAt ?? order.placedAt).getTime()) / DAY));
+  const risk = scoreRisk({
+    valueMinor,
+    returns90d: history,
+    claimed90dMinor: prior.reduce((s, p) => s + p.valueMinor, 0),
+    changedMind90d: prior.filter((p) => p.items.some((i) => i.reason === "changed_mind")).length,
+    reasons: lines.map((l) => l.reason),
+    hasPhotos: lines.some((l) => l.photos.length > 0),
+    paymentMethod: order.paymentMethod,
+    daysSinceDelivery,
+    windowDays: org.returnWindowDays,
+    orderToReturnRatio: order.totalMinor ? valueMinor / order.totalMinor : 0,
+  });
 
   const ctx: RuleContext & { orderStatus: string; valueMinor: number } = {
     value: valueMinor / 100,
@@ -68,14 +87,23 @@ export async function createReturn(input: {
     reason: lines.map((l) => l.reason),
     category: lines.map((l) => itemsById.get(l.orderItemId)!.category ?? "").filter(Boolean),
     customer_returns_90d: history,
-    days_since_delivery: Math.max(0, Math.floor((now.getTime() - (order.deliveredAt ?? order.placedAt).getTime()) / DAY)),
+    days_since_delivery: daysSinceDelivery,
     payment_method: order.paymentMethod,
     item_count: lines.reduce((s, l) => s + l.quantity, 0),
     resolution: input.resolution,
     has_photos: lines.some((l) => l.photos.length > 0),
+    risk_score: risk.score,
     orderStatus: order.status,
   };
   const result = evaluate(org, ctx, rules);
+  if (risk.level === "high") {
+    result.flags = [...new Set([...result.flags, "High return risk", "Refund on hold until inspection"])];
+    result.holdRefund = true;
+    if (result.outcome === "auto_approve") {
+      result.outcome = "review";
+      result.reason = `High return risk (score ${risk.score})`;
+    }
+  }
   const system: Actor = { type: "system", label: "ReturnFlow" };
   const notes: Note[] = [];
 
@@ -97,6 +125,10 @@ export async function createReturn(input: {
         eligibility: JSON.stringify(serialize(result)),
         flags: JSON.stringify(result.flags),
         requiresManager: result.requiresManager,
+        riskScore: risk.score,
+        riskLevel: risk.level,
+        riskFactors: JSON.stringify(risk.factors),
+        holdRefund: result.holdRefund,
         createdAt: now,
       },
     });
@@ -135,6 +167,7 @@ export async function createReturn(input: {
   });
 
   notes.forEach((n) => queueNotification(created.id, n.key, n.extra));
+  queueReasonAnalysis(created.id);
   return { id: created.id, number: created.number, rma: rma(created.number), valueMinor, outcome: result.outcome, status: result.outcome === "auto_approve" ? "approved" : result.outcome === "auto_reject" ? "rejected" : "requested", reason: result.reason };
 }
 
@@ -260,4 +293,24 @@ export async function recordCheckpoint(orgId: string, shipmentId: string, cp: { 
     await audit({ organizationId: orgId, actor, action: "return.tracking_updated", entityType: "return", entityId: r.id, meta: { rma: rma(r.number), awb: sh.awb, status: cp.status, source: cp.source }, req }, tx);
   });
   notes.forEach((n) => queueNotification(r.id, n.key, n.extra));
+}
+
+// ───────────────────────── AI reason analysis ─────────────────────────
+
+const pendingAi = new Set<Promise<unknown>>();
+export const flushAi = () => Promise.all([...pendingAi]);
+
+/** Classifies each item's free-text reason in the background; never blocks the customer. */
+export function queueReasonAnalysis(returnId: string) {
+  const p = (async () => {
+    const items = await db.returnItem.findMany({ where: { returnId }, include: { orderItem: { select: { name: true } } } });
+    for (const it of items) {
+      const text = it.reasonDetail?.trim();
+      if (!text) continue;
+      const a = await classifyReason(text, it.reason, it.orderItem.name);
+      await db.returnItem.update({ where: { id: it.id }, data: { aiReason: a.reason, aiSummary: a.summary, aiConfidence: a.confidence, aiSource: a.source } });
+    }
+  })().catch((e) => console.error("reason analysis failed", e));
+  pendingAi.add(p);
+  p.finally(() => pendingAi.delete(p));
 }

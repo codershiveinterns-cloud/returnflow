@@ -17,6 +17,7 @@ export const FIELDS = {
   item_count: { label: "Items in request", type: "number" },
   resolution: { label: "Requested outcome", type: "enum", options: ["refund", "store_credit", "replacement"] },
   has_photos: { label: "Photos attached", type: "boolean" },
+  risk_score: { label: "Risk score (0–100)", type: "number" },
 } as const;
 export type Field = keyof typeof FIELDS;
 
@@ -64,6 +65,7 @@ export type RuleContext = {
   item_count: number;
   resolution: string;
   has_photos: boolean;
+  risk_score: number;
 };
 
 function compare(op: Condition["op"], actual: number | string | boolean, expected: number | string | boolean) {

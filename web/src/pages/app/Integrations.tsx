@@ -19,9 +19,11 @@ type IntegrationsData = {
   webhook: { url: string; secretPreview: string };
   api: { baseUrl: string; keys: { id: string; name: string; prefix: string; lastUsedAt: string | null; revokedAt: string | null; createdAt: string }[] };
   lastActivity: Record<string, string>;
+  razorpay: null | { mode: "live" | "sandbox"; displayName: string; keyId: string | null; createdAt: string };
+  ai: { provider: "claude" | "rules"; model: string | null };
 };
 
-type Tab = "shopify" | "csv" | "api" | "webhook" | "courier" | "history";
+type Tab = "shopify" | "csv" | "api" | "webhook" | "courier" | "payments" | "history";
 
 export function SyncStatus({ status }: { status: string }) {
   const map: Record<string, [string, "done" | "review" | "danger" | "progress"]> = {
@@ -51,6 +53,7 @@ export function IntegrationsPage() {
           { id: "api", label: "REST API" },
           { id: "webhook", label: "Order webhook" },
           { id: "courier", label: "Courier tracking" },
+          { id: "payments", label: "Payments & AI" },
           { id: "history", label: "Sync history" },
         ]}
       />
@@ -67,6 +70,8 @@ export function IntegrationsPage() {
           <WebhookPanel data={data} />
         ) : tab === "courier" ? (
           <CourierPanel data={data} />
+        ) : tab === "payments" ? (
+          <PaymentsPanel data={data} />
         ) : (
           <HistoryPanel />
         )}
@@ -709,6 +714,89 @@ X-ReturnFlow-Signature: t=<unix>,v1=<hmac>
       <Card className="overflow-hidden h-fit">
         <CardHeader title="Example update" action={<CopyButton value={example} />} />
         <pre className="mx-5 mb-5 rounded-lg bg-[#131519] text-[#d9d5cc] text-[12px] leading-[1.6] p-4 overflow-x-auto scrollbar-thin font-mono">{example}</pre>
+      </Card>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ Payments & AI
+
+function PaymentsPanel({ data }: { data: IntegrationsData }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [form, setForm] = useState({ keyId: "", keySecret: "" });
+  const [editing, setEditing] = useState(false);
+  const connect = useMutation({
+    mutationFn: (body: object) => api<{ displayName: string }>("/integrations/razorpay", { method: "POST", body }),
+    onSuccess: (r) => {
+      toast.success(`Connected: ${r.displayName}`);
+      setEditing(false);
+      setForm({ keyId: "", keySecret: "" });
+      qc.invalidateQueries({ queryKey: ["integrations"] });
+    },
+  });
+  const disconnect = useMutation({
+    mutationFn: () => api("/integrations/razorpay", { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["integrations"] }),
+  });
+  const err = connect.error instanceof ApiError ? connect.error : null;
+  const rz = data.razorpay;
+  return (
+    <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr] items-start">
+      <Card className="overflow-hidden">
+        <div className="flex flex-wrap items-start gap-4 p-5">
+          <div className="grid place-items-center size-11 rounded-xl bg-[#e8eefc] text-[#2b4fb3] shrink-0 font-semibold text-[15px]">Rz</div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-[16px] font-semibold">Razorpay refunds</h2>
+              {rz ? (rz.mode === "sandbox" ? <Badge tone="review">Test mode</Badge> : <Badge tone="done">Connected</Badge>) : <Badge>Not connected</Badge>}
+            </div>
+            <p className="mt-1 text-[13.5px] text-muted">Refunds go back to the customer's original payment, using the payment ID synced with each order. COD orders are refunded by bank / UPI transfer and recorded with a reference.</p>
+            {rz?.keyId && <div className="mt-2 font-mono text-[12.5px] text-ink-2">{rz.keyId}</div>}
+          </div>
+        </div>
+        {rz?.mode === "sandbox" && !editing && (
+          <div className="mx-5 mb-4 flex gap-2.5 rounded-lg bg-kraft-soft/60 text-kraft-ink px-3.5 py-3 text-[13px]">
+            <FlaskConical className="size-4 shrink-0 mt-0.5" />
+            <span>Test mode issues simulated refunds (references start with <Code>rfnd_test_</Code>) so the full flow can be tried safely. Add your API keys to send real refunds.</span>
+          </div>
+        )}
+        {(editing || !rz) && (
+          <div className="border-t border-line px-5 py-4 space-y-3">
+            {err && !err.fields && <div className="rounded-lg bg-danger-bg text-danger text-[13px] px-3.5 py-2.5">{err.message}</div>}
+            <div className="grid sm:grid-cols-2 gap-3">
+              <Input label="Key ID" placeholder="rzp_live_…" value={form.keyId} onChange={(e) => setForm({ ...form, keyId: e.target.value })} error={err?.fieldError("keyId")} inputClassName="font-mono" />
+              <Input label="Key secret" type="password" value={form.keySecret} onChange={(e) => setForm({ ...form, keySecret: e.target.value })} error={err?.fieldError("keySecret")} />
+            </div>
+            <p className="text-[12.5px] text-muted">Razorpay Dashboard → Account & Settings → API Keys. Keys are verified, then encrypted at rest.</p>
+          </div>
+        )}
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-3 bg-paper/50">
+          {!rz && <Button variant="ghost" className="mr-auto" icon={<FlaskConical className="size-4" />} onClick={() => connect.mutate({ mode: "sandbox" })} loading={connect.isPending && !form.keyId}>Use test mode</Button>}
+          {rz && !editing && <Button variant="danger" size="sm" className="mr-auto" loading={disconnect.isPending} onClick={() => confirm("Disconnect Razorpay?") && disconnect.mutate()}>Disconnect</Button>}
+          {editing || !rz ? (
+            <>
+              {rz && <Button variant="secondary" onClick={() => setEditing(false)}>Cancel</Button>}
+              <Button loading={connect.isPending && !!form.keyId} onClick={() => connect.mutate({ mode: "live", ...form })}>Verify & connect</Button>
+            </>
+          ) : (
+            <Button variant="secondary" onClick={() => setEditing(true)}>{rz.mode === "sandbox" ? "Add live keys" : "Update keys"}</Button>
+          )}
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <div className="flex items-center gap-2">
+          <h3 className="text-[14px] font-semibold">AI analysis</h3>
+          {data.ai.provider === "claude" ? <Badge tone="done">Claude</Badge> : <Badge>Built-in rules</Badge>}
+        </div>
+        <ul className="mt-3 space-y-2 text-[13.5px] text-ink-2">
+          <li>Classifies customers' free-text reasons for cleaner analytics.</li>
+          <li>Suggests a condition grade from photos and the checklist, and flags claims that don't match the item.</li>
+        </ul>
+        <p className="mt-3 text-[12.5px] text-muted">
+          {data.ai.provider === "claude" ? `Using ${data.ai.model}. Suggestions are advisory — staff always decide.` : <>Running on the built-in analyser. Add <Code>ANTHROPIC_API_KEY</Code> on the server to analyse photos with Claude.</>}
+        </p>
       </Card>
     </div>
   );

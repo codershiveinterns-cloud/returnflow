@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, Check, CornerUpRight, Lock, MapPin, Truck, X } from "lucide-react";
+import { ArrowUpRight, Check, ClipboardCheck, CornerUpRight, Lock, MapPin, PackageCheck, Truck, Wallet, X } from "lucide-react";
+import { useNavigate } from "react-router";
+import { ResolveModal } from "./ResolveModal";
 import { api, ApiError } from "@/lib/api";
 import { CHECKPOINTS, COURIERS, REJECT_REASONS } from "@/lib/domain";
 import { useCan } from "@/lib/session";
@@ -9,14 +11,39 @@ import { Input, Select, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Overlay";
 import { useToast } from "@/components/ui/Toast";
 
-export type ActionableReturn = { id: string; rma: string; status: string; requiresManager: boolean; customer: { name: string | null } };
+export type ActionableReturn = {
+  id: string;
+  rma: string;
+  status: string;
+  requiresManager: boolean;
+  customer: { name: string | null };
+  resolution: string;
+  valueMinor: number;
+  currency: string;
+  order: { paymentMethod: string };
+  paymentRef: string | null;
+  items: { inspection: { grade: string } | null }[];
+  resolvable: { ok: boolean; why?: string };
+  refunds: unknown[];
+};
 
-type Dialog = null | "approve" | "reject" | "escalate" | "pickup" | "tracking" | "override";
+type Dialog = null | "approve" | "reject" | "escalate" | "pickup" | "tracking" | "override" | "resolve";
 
 /** Context-aware action bar for a return, shown at the bottom of the detail drawer. */
 export function ReturnActions({ ret }: { ret: ActionableReturn }) {
   const can = useCan();
   const [open, setOpen] = useState<Dialog>(null);
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const receive = useMutation({
+    mutationFn: () => api(`/returns/${ret.id}/receive`, { method: "POST" }),
+    onSuccess: () => {
+      toast.success(`${ret.rma} received at the warehouse`);
+      ["returns", "return", "inspections", "pickups"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    },
+  });
+  const uninspected = ret.items.some((i) => !i.inspection);
   const managerOnly = ret.requiresManager && !can("returns:decide_escalated");
 
   let bar: React.ReactNode = null;
@@ -36,8 +63,23 @@ export function ReturnActions({ ret }: { ret: ActionableReturn }) {
     bar = <Button variant="secondary" icon={<ArrowUpRight className="size-4" />} onClick={() => setOpen("override")}>Override &amp; approve</Button>;
   } else if (ret.status === "approved" && can("pickups:manage")) {
     bar = <Button icon={<Truck className="size-4" />} onClick={() => setOpen("pickup")}>Schedule pickup</Button>;
-  } else if ((ret.status === "pickup_scheduled" || ret.status === "in_transit") && can("pickups:manage")) {
-    bar = <Button icon={<MapPin className="size-4" />} onClick={() => setOpen("tracking")}>Update tracking</Button>;
+  } else if ((ret.status === "pickup_scheduled" || ret.status === "in_transit") && (can("pickups:manage") || can("inspection:perform"))) {
+    bar = (
+      <>
+        {can("pickups:manage") && <Button variant={can("inspection:perform") ? "secondary" : "primary"} icon={<MapPin className="size-4" />} onClick={() => setOpen("tracking")}>Update tracking</Button>}
+        {can("inspection:perform") && <Button icon={<PackageCheck className="size-4" />} loading={receive.isPending} onClick={() => receive.mutate()}>Mark received</Button>}
+      </>
+    );
+  } else if ((ret.status === "received" || ret.status === "inspected") && (can("inspection:perform") || can("refunds:issue"))) {
+    const showInspect = uninspected && can("inspection:perform");
+    const showResolve = can("refunds:issue") && ret.refunds.length === 0;
+    bar = (
+      <>
+        {showInspect && <Button variant={showResolve && ret.resolvable.ok ? "secondary" : "primary"} icon={<ClipboardCheck className="size-4" />} onClick={() => navigate(`/app/inspection/${ret.id}`)}>Inspect items</Button>}
+        {showResolve && (ret.resolvable.ok ? <Button icon={<Wallet className="size-4" />} onClick={() => setOpen("resolve")}>Resolve</Button> : <span className="inline-flex items-center gap-1.5 text-[13px] text-muted"><Lock className="size-4" /> {ret.resolvable.why}</span>)}
+      </>
+    );
+    if (!showInspect && !showResolve) bar = null;
   }
   if (!bar) return null;
 
@@ -50,6 +92,12 @@ export function ReturnActions({ ret }: { ret: ActionableReturn }) {
       {open === "escalate" && <DecisionModal ret={ret} kind="escalate" onClose={() => setOpen(null)} />}
       {open === "pickup" && <PickupModal ret={ret} onClose={() => setOpen(null)} />}
       {open === "tracking" && <TrackingModal ret={ret} onClose={() => setOpen(null)} />}
+      {open === "resolve" && (
+        <ResolveModal
+          ret={{ id: ret.id, rma: ret.rma, resolution: ret.resolution, valueMinor: ret.valueMinor, currency: ret.currency, paymentMethod: ret.order.paymentMethod, hasPaymentRef: !!ret.paymentRef, grades: ret.items.map((i) => i.inspection?.grade).filter(Boolean) as string[] }}
+          onClose={() => setOpen(null)}
+        />
+      )}
     </>
   );
 }

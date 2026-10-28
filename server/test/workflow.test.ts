@@ -6,7 +6,7 @@ import { flushNotifications } from "../src/notify/index.js";
 import { app, login } from "./helpers.js";
 
 const policy = { returnWindowDays: 30, nonReturnableCategories: '["Innerwear"]', autoApproveMaxMinor: 500000, maxReturnsPer90Days: 3, requirePhotoForDamage: true, currency: "INR" };
-const base = { value: 1899, valueMinor: 189900, reason: ["size_issue"], category: ["Apparel"], customer_returns_90d: 0, days_since_delivery: 5, payment_method: "prepaid", item_count: 1, resolution: "refund", has_photos: false, orderStatus: "delivered" };
+const base = { value: 1899, valueMinor: 189900, reason: ["size_issue"], category: ["Apparel"], customer_returns_90d: 0, days_since_delivery: 5, payment_method: "prepaid", item_count: 1, resolution: "refund", has_photos: false, risk_score: 0, orderStatus: "delivered" };
 const rule = (action: string, conditions: object[], extra = {}) => ({ id: action, name: action, match: "all", conditions: JSON.stringify(conditions), action, actionNote: null, ...extra });
 
 describe("eligibility engine", () => {

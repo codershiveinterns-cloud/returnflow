@@ -21,6 +21,10 @@ export const PERMISSIONS = [
   "pickups:manage",
   "rules:manage",
   "notifications:view",
+  "inspection:perform",
+  "refunds:issue",
+  "inventory:view",
+  "risk:view",
   "integrations:manage",
   "team:view",
   "team:manage",
@@ -31,10 +35,10 @@ export type Permission = (typeof PERMISSIONS)[number];
 
 const MATRIX: Record<Role, readonly Permission[]> = {
   admin: PERMISSIONS,
-  manager: ["dashboard:view", "orders:view", "returns:view", "returns:decide", "returns:decide_escalated", "pickups:manage", "notifications:view", "team:view", "audit:view"],
-  support: ["dashboard:view", "orders:view", "returns:view", "returns:decide", "pickups:manage", "notifications:view"],
-  warehouse: ["returns:view", "pickups:manage"],
-  finance: ["dashboard:view", "orders:view", "returns:view", "audit:view"],
+  manager: ["dashboard:view", "orders:view", "returns:view", "returns:decide", "returns:decide_escalated", "pickups:manage", "notifications:view", "inspection:perform", "refunds:issue", "inventory:view", "risk:view", "team:view", "audit:view"],
+  support: ["dashboard:view", "orders:view", "returns:view", "returns:decide", "pickups:manage", "notifications:view", "risk:view"],
+  warehouse: ["returns:view", "pickups:manage", "inspection:perform", "inventory:view"],
+  finance: ["dashboard:view", "orders:view", "returns:view", "refunds:issue", "inventory:view", "risk:view", "audit:view"],
 };
 
 export const ROLE_META: Record<Role, { label: string; description: string }> = {

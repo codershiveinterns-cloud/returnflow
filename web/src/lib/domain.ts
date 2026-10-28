@@ -43,6 +43,33 @@ export const SHIPMENT_STATUS: Record<string, { label: string; tone: Tone }> = {
   failed: { label: "Failed", tone: "danger" },
 };
 
+export const GRADES: Record<string, { label: string; hint: string }> = {
+  A: { label: "A · Like new", hint: "Resaleable as new" },
+  B: { label: "B · Minor issues", hint: "Missing tag or packaging" },
+  C: { label: "C · Damaged / worn", hint: "Visible damage or use" },
+  D: { label: "D · Unusable", hint: "Can't be sold or repaired" },
+};
+
+export const DISPOSITIONS: Record<string, { label: string; tone: Tone }> = {
+  restock: { label: "Restock", tone: "done" },
+  refurbish: { label: "Refurbish", tone: "progress" },
+  damaged: { label: "Damaged", tone: "review" },
+  dispose: { label: "Dispose", tone: "danger" },
+};
+
+export const RISK: Record<string, { label: string; tone: Tone }> = {
+  low: { label: "Low risk", tone: "done" },
+  medium: { label: "Medium risk", tone: "review" },
+  high: { label: "High risk", tone: "danger" },
+};
+
+export const CHECKLIST: Record<string, { label: string; pass: string; fail: string }> = {
+  packaging: { label: "Original packaging", pass: "Intact", fail: "Missing / damaged" },
+  tags: { label: "Tags & labels", pass: "Attached", fail: "Missing" },
+  damage: { label: "Physical damage", pass: "None found", fail: "Damaged" },
+  usage: { label: "Signs of use", pass: "Unused", fail: "Worn / used" },
+};
+
 export const ORDER_STATUS: Record<string, { label: string; tone: Tone }> = {
   pending: { label: "Unfulfilled", tone: "neutral" },
   fulfilled: { label: "Shipped", tone: "progress" },
@@ -79,6 +106,10 @@ export type Permission =
   | "pickups:manage"
   | "rules:manage"
   | "notifications:view"
+  | "inspection:perform"
+  | "refunds:issue"
+  | "inventory:view"
+  | "risk:view"
   | "integrations:manage"
   | "team:view"
   | "team:manage"

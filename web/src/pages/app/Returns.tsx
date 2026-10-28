@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Camera, Check, ExternalLink, ImageOff, Inbox, Lock, Mail, MessageSquareQuote, Phone, Search, ShieldAlert, Truck, UserRound, X as XIcon, Zap } from "lucide-react";
+import { Camera, Check, ExternalLink, ImageOff, Inbox, Lock, Mail, MessageSquareQuote, Phone, Search, ShieldAlert, Sparkles, Truck, UserRound, Wallet, X as XIcon, Zap } from "lucide-react";
 import { api } from "@/lib/api";
-import { CHECKPOINTS, REASONS, RESOLUTIONS, RETURN_STATUS, SHIPMENT_STATUS } from "@/lib/domain";
+import { CHECKLIST, CHECKPOINTS, DISPOSITIONS, REASONS, RESOLUTIONS, RETURN_STATUS, RISK, SHIPMENT_STATUS } from "@/lib/domain";
+import { ScoreRing } from "./Risk";
 import { date, dateTime, money, relative } from "@/lib/format";
 import { useCan } from "@/lib/session";
 import { Badge, Code, ReturnStatusBadge } from "@/components/ui/Badge";
@@ -216,9 +217,13 @@ type Detail = {
   valueMinor: number;
   currency: string;
   createdAt: string;
-  order: { id: string; orderNumber: string; placedAt: string; deliveredAt: string | null; status: string; paymentMethod: string; totalMinor: number; source: string };
+  order: { id: string; orderNumber: string; placedAt: string; deliveredAt: string | null; status: string; paymentMethod: string; paymentRef: string | null; totalMinor: number; source: string };
   customer: { id: string; name: string | null; email: string; phone: string | null; orderCount: number; returnCount: number };
-  items: { id: string; quantity: number; reason: string; reasonDetail: string | null; sku: string; name: string; variant: string | null; category: string | null; unitPriceMinor: number; photos: string[] }[];
+  items: {
+    id: string; quantity: number; reason: string; reasonDetail: string | null; sku: string; name: string; variant: string | null; category: string | null; unitPriceMinor: number; photos: string[]; inspectionPhotos: string[];
+    ai: { reason: string; summary: string; confidence: number; source: string } | null;
+    inspection: null | { checklist: Record<string, string>; grade: string; disposition: string; notes: string | null; mismatch: boolean; aiSuggestion: { explanation: string } | null; inspectorName: string | null; createdAt: string };
+  }[];
   events: { id: string; status: string | null; message: string; actorType: string; actorLabel: string | null; createdAt: string }[];
   eligibility: null | { outcome: string; reason: string; checks: { key: string; label: string; pass: boolean; severity: string; detail: string }[]; matchedRules: { id: string; name: string; action: string; note?: string | null }[] };
   flags: string[];
@@ -226,6 +231,11 @@ type Detail = {
   decision: null | { reason: string | null; at: string; by: string };
   shipment: null | { courier: string; awb: string; status: string; scheduledFor: string | null; pickupWindow: string | null; checkpoints: { id: string; status: string; location: string | null; note: string | null; source: string; at: string }[] };
   notifications: { id: string; template: string; subject: string | null; status: string; to: string; createdAt: string }[];
+  risk: null | { score: number; level: string; factors: { label: string; points: number }[] };
+  holdRefund: boolean;
+  refunds: { id: string; kind: string; method: string; amountMinor: number; currency: string; status: string; reference: string | null; gatewayMode: string | null; note: string | null; createdByName: string | null; createdAt: string; error: string | null }[];
+  resolvable: { ok: boolean; why?: string };
+  paymentRef: string | null;
 };
 
 function ReturnDrawer({ id, onClose }: { id: string | null; onClose: () => void }) {
@@ -262,6 +272,10 @@ function ReturnDrawer({ id, onClose }: { id: string | null; onClose: () => void 
             </section>
           )}
 
+          {data.refunds.length > 0 && <RefundCard refunds={data.refunds} />}
+
+          {data.risk && <RiskCard risk={data.risk} />}
+
           {data.eligibility && <EligibilityCard e={data.eligibility} decision={data.decision} status={data.status} />}
 
           {data.shipment && <ShipmentCard s={data.shipment} />}
@@ -286,7 +300,32 @@ function ReturnDrawer({ id, onClose }: { id: string | null; onClose: () => void 
                   <div className="mt-3 rounded-lg bg-paper px-3 py-2.5">
                     <Badge tone="neutral" className="!bg-surface border border-line">{REASONS[i.reason]}</Badge>
                     {i.reasonDetail && <p className="mt-2 text-[13.5px] text-ink-2">“{i.reasonDetail}”</p>}
+                    {i.ai && (
+                      <p className="mt-2 flex items-start gap-1.5 text-[12.5px] text-progress">
+                        <Sparkles className="size-3.5 mt-0.5 shrink-0" />
+                        <span>{i.ai.reason === i.reason ? `Confirmed: ${REASONS[i.ai.reason]}` : `Reads like “${REASONS[i.ai.reason]}”, not “${REASONS[i.reason]}”`}{i.ai.source === "claude" ? ` · ${i.ai.summary}` : ""}</span>
+                      </p>
+                    )}
                   </div>
+                  {i.inspection && (
+                    <div className={clsx("mt-3 rounded-lg border px-3 py-2.5", i.inspection.mismatch ? "border-danger/30 bg-danger-bg/40" : "border-line")}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[13px] font-semibold">Inspection · grade {i.inspection.grade}</span>
+                        <Badge tone={DISPOSITIONS[i.inspection.disposition].tone}>{DISPOSITIONS[i.inspection.disposition].label}</Badge>
+                        {i.inspection.mismatch && <span className="text-[12px] text-danger font-medium inline-flex items-center gap-1"><ShieldAlert className="size-3.5" /> Doesn't match claim</span>}
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[12px]">
+                        {Object.entries(i.inspection.checklist).map(([k, v]) => (
+                          <span key={k} className={v === "pass" ? "text-muted" : "text-danger"}>{v === "pass" ? "✓" : "✕"} {CHECKLIST[k]?.label}</span>
+                        ))}
+                      </div>
+                      {i.inspection.notes && <p className="mt-1.5 text-[12.5px] text-ink-2">{i.inspection.notes}</p>}
+                      {i.inspectionPhotos.length > 0 && (
+                        <div className="mt-2 flex gap-2">{i.inspectionPhotos.map((src) => <button key={src} onClick={() => setLightbox(src)} className="size-14 rounded-md overflow-hidden border border-line"><img src={src} alt="Inspection photo" className="size-full object-cover" /></button>)}</div>
+                      )}
+                      <div className="mt-1.5 text-[11.5px] text-faint">{i.inspection.inspectorName} · {dateTime(i.inspection.createdAt)}</div>
+                    </div>
+                  )}
                   {i.photos.length > 0 ? (
                     <div className="mt-3 flex gap-2 flex-wrap">
                       {i.photos.map((src) => (
@@ -472,5 +511,43 @@ function EmailsCard({ items }: { items: Detail["notifications"] }) {
         {data && <iframe title="Email preview" srcDoc={data.html} sandbox="" className="w-full h-[460px] rounded-lg border border-line bg-paper" />}
       </Modal>
     </section>
+  );
+}
+
+function RiskCard({ risk }: { risk: NonNullable<Detail["risk"]> }) {
+  return (
+    <Card className="p-4 flex items-start gap-4">
+      <ScoreRing score={risk.score} size={48} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-[13.5px] font-semibold">Return risk</span>
+          <Badge tone={RISK[risk.level]?.tone ?? "neutral"}>{RISK[risk.level]?.label ?? risk.level}</Badge>
+        </div>
+        {risk.factors.length ? (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {risk.factors.map((f) => <span key={f.label} className="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-paper text-[12px] text-ink-2">{f.label}<b className="text-faint font-medium">+{f.points}</b></span>)}
+          </div>
+        ) : (
+          <p className="mt-1 text-[12.5px] text-muted">No risk signals on this request.</p>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function RefundCard({ refunds }: { refunds: Detail["refunds"] }) {
+  const r = refunds[0];
+  const label = r.kind === "replacement" ? "Replacement sent" : r.kind === "store_credit" ? "Store credit issued" : r.status === "processing" ? "Refund processing" : r.status === "failed" ? "Refund failed" : "Refunded";
+  return (
+    <Card className={clsx("p-4 flex items-start gap-3", r.status === "failed" ? "border-danger/40" : "border-done/30 bg-done-bg/30")}>
+      <span className={clsx("grid place-items-center size-9 rounded-lg shrink-0", r.status === "failed" ? "bg-danger-bg text-danger" : "bg-done-bg text-done")}><Wallet className="size-4" /></span>
+      <div className="min-w-0 flex-1">
+        <div className="text-[14px] font-semibold">{label}{r.kind !== "replacement" && ` · ${money(r.amountMinor, r.currency)}`}{r.gatewayMode === "test" && <Badge tone="review" className="ml-2">Test mode</Badge>}</div>
+        <div className="text-[12.5px] text-muted">
+          {r.method === "razorpay" ? "Razorpay" : r.method === "manual" ? "Bank / UPI" : r.method === "store_credit" ? "Credit code" : "Order"} <Code className="text-ink-2">{r.reference ?? r.error}</Code>
+        </div>
+        <div className="text-[12px] text-faint">{r.createdByName} · {dateTime(r.createdAt)}{r.note ? ` · ${r.note}` : ""}</div>
+      </div>
+    </Card>
   );
 }

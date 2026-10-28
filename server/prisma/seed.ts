@@ -25,7 +25,8 @@ import { ingestOrders, recordSync } from "../src/orders/ingest.js";
 import { mapShopifyOrder } from "../src/orders/shopify.js";
 import { sandboxOrders } from "../src/orders/shopifySandbox.js";
 import type { OrderInput } from "../src/orders/schema.js";
-import { createReturn, recordCheckpoint, schedulePickup } from "../src/returns/service.js";
+import { createReturn, flushAi, recordCheckpoint, schedulePickup } from "../src/returns/service.js";
+import { recordInspection, resolveReturn, suggestCondition } from "../src/returns/resolution.js";
 import { flushNotifications } from "../src/notify/index.js";
 
 const PASSWORD = "Demo@12345";
@@ -69,6 +70,7 @@ function makeOrders(count: number, start: number): OrderInput[] {
       placed_at: placed,
       status,
       payment_method: i % 4 === 1 ? "cod" : "prepaid",
+      payment_id: i % 4 === 1 ? undefined : `pay_N${(start + i).toString(36).toUpperCase()}k${(i * 7919).toString(36)}`,
       currency: "INR",
       delivered_at: status === "delivered" ? new Date(placed.getTime() + 4 * DAY) : undefined,
       customer: { email, name, phone },
@@ -149,6 +151,7 @@ async function main() {
     { order: "1018", lines: [{ sku: "JNS-SLM-32", reason: "size_issue", detail: "Waist runs small" }], resolution: "store_credit", days: 8 },
     { order: "1016", lines: [{ sku: "SAR-CTN-MUL", reason: "wrong_item", detail: "Received a blue saree instead of mulberry" }], resolution: "refund", days: 6, note: "Please arrange pickup after 5pm." },
     { order: "1022", lines: [{ sku: "KRT-LIN-L-SND", reason: "size_issue", detail: "Shoulders are too narrow" }], resolution: "replacement", days: 5 },
+    { order: "1010", lines: [{ sku: "SNK-CNV-8-WHT", reason: "not_as_described", detail: "The white is more of a cream colour" }], resolution: "refund", days: 4.5 },
     { order: "1023", lines: [{ sku: "DRS-MID-S-RST", reason: "not_as_described", detail: "Colour is much darker than the photos" }], resolution: "store_credit", days: 4 },
     { order: "1020", lines: [{ sku: "SAR-CTN-MUL", reason: "size_issue" }], resolution: "refund", days: 3 },
     { order: "1021", lines: [{ sku: "KRT-LIN-M-IND", reason: "changed_mind" }], resolution: "refund", days: 2 },
@@ -195,6 +198,39 @@ async function main() {
     await recordCheckpoint(kaveri.id, sh.id, { status: "picked_up", location: "Mumbai", source: "manual", at: ago(2) }, staff.actor);
   });
   await tryStep(() => schedulePickup(staff, created["1021"], { courier: "Xpressbees", awb: "XB1400238877", scheduledFor: ago(-1), pickupWindow: "2pm – 6pm" }));
+  // Payments: Razorpay in test mode so refunds can be issued end to end
+  await db.integration.create({
+    data: { organizationId: kaveri.id, provider: "razorpay", mode: "sandbox", displayName: "Razorpay · test mode", configEnc: encryptJson({ keyId: "test", keySecret: "test" }) },
+  });
+
+  // Back half of the loop: inspection, inventory and resolution
+  const wh = await db.user.findUniqueOrThrow({ where: { email: "warehouse@kaveri.test" } });
+  const fin = await db.user.findUniqueOrThrow({ where: { email: "finance@kaveri.test" } });
+  const warehouse = { orgId: kaveri.id, actor: { type: "user" as const, id: wh.id, label: wh.name }, role: "warehouse" as const, userId: wh.id };
+  const finance = { orgId: kaveri.id, actor: { type: "user" as const, id: fin.id, label: fin.name }, role: "finance" as const, userId: fin.id };
+  const allPass = { packaging: "pass", tags: "pass", damage: "pass", usage: "pass" } as const;
+  const inspectAll = async (returnId: string, checklist: typeof allPass | Record<string, "pass" | "fail">, grade: "A" | "B" | "C" | "D", disposition: "restock" | "refurbish" | "damaged" | "dispose", notes?: string) => {
+    for (const it of await db.returnItem.findMany({ where: { returnId } })) {
+      const ai = await suggestCondition(kaveri.id, returnId, it.id, checklist as never);
+      await recordInspection(warehouse, returnId, it.id, { checklist: checklist as never, grade, disposition, notes, aiSuggestion: ai, photos: [] });
+    }
+  };
+  const deliver = async (returnId: string, courier: string, awb: string, city: string) => {
+    await schedulePickup(staff, returnId, { courier, awb, scheduledFor: ago(2) });
+    const sh = await db.shipment.findUniqueOrThrow({ where: { returnId } });
+    await recordCheckpoint(kaveri.id, sh.id, { status: "picked_up", location: city, source: "webhook", at: ago(1.5) }, { type: "system", label: `${courier} tracking` });
+    await recordCheckpoint(kaveri.id, sh.id, { status: "delivered", location: "Bhiwandi DC", source: "webhook", at: ago(0.5) }, { type: "system", label: `${courier} tracking` });
+  };
+  await tryStep(async () => {
+    await inspectAll(created["1018"], allPass, "A", "restock");
+    await resolveReturn(finance, created["1018"], { kind: "store_credit", method: "store_credit" });
+  });
+  await tryStep(async () => {
+    await deliver(created["1023"], "Shadowfax", "SFX2210098431", "Delhi");
+    await inspectAll(created["1023"], { packaging: "pass", tags: "fail", damage: "pass", usage: "pass" }, "B", "refurbish", "Swing tag missing, garment fine");
+  });
+  await tryStep(() => deliver(created["1025"], "Ecom Express", "EC77810045", "Hyderabad"));
+
   // Booking happened before the courier events above; date the "scheduled" checkpoints accordingly.
   for (const sh of await db.shipment.findMany({ where: { organizationId: kaveri.id }, include: { checkpoints: true } })) {
     const firstMove = sh.checkpoints.filter((c) => c.status !== "scheduled").sort((a, b) => a.at.getTime() - b.at.getTime())[0];
@@ -202,6 +238,7 @@ async function main() {
     await db.shipmentCheckpoint.updateMany({ where: { shipmentId: sh.id, status: "scheduled" }, data: { at: bookedAt } });
   }
   await flushNotifications();
+  await flushAi();
 
   // Second tenant: proves isolation (its data must never appear in Kaveri's console)
   const northwind = await createWorkspace("Northwind Outfitters", "northwind", [["Leo Fernandes", "admin@northwind.test", "admin"]], "#1d4d4f");

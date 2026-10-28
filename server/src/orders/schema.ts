@@ -35,6 +35,7 @@ export const orderInput = z.object({
   placed_at: z.coerce.date({ message: "placed_at must be a valid date" }),
   status: z.enum(ORDER_STATUSES).default("fulfilled"),
   payment_method: z.enum(["prepaid", "cod"]).default("prepaid"),
+  payment_id: optionalText(64),
   currency: z.preprocess((v) => (v === "" || v === null ? undefined : v), z.string().trim().length(3).toUpperCase().optional()),
   delivered_at: z.preprocess((v) => (v === "" || v === null ? undefined : v), z.coerce.date().optional()),
   total: z.preprocess((v) => (v === "" || v === null ? undefined : v), z.coerce.number().nonnegative().optional()),

@@ -88,6 +88,7 @@ async function upsertOrder(orgId: string, input: OrderInput, source: OrderSource
       externalId: input.external_id ?? null,
       status: input.status,
       paymentMethod: input.payment_method,
+    paymentRef: input.payment_id ?? null,
       currency,
       totalMinor,
       placedAt: input.placed_at,

@@ -66,6 +66,7 @@ rulesRouter.post("/preview", async (req, res) => {
       item_count: r.items.reduce((s, i) => s + i.quantity, 0),
       resolution: r.resolution,
       has_photos: r._count.photos > 0,
+      risk_score: r.riskScore ?? 0,
     };
     if (ruleMatches(body, ctx)) matches.push({ rma: rma(r.number), valueMinor: r.valueMinor, currency: r.currency });
   }

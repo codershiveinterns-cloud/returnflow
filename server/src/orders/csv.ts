@@ -10,6 +10,7 @@ export const CSV_COLUMNS = [
   "placed_at",
   "status",
   "payment_method",
+  "payment_id",
   "currency",
   "delivered_at",
   "customer_email",
@@ -35,9 +36,9 @@ const ALIASES: Record<string, string> = {
 
 export const CSV_TEMPLATE = [
   CSV_COLUMNS.join(","),
-  "1001,2026-09-02,delivered,prepaid,INR,2026-09-06,ananya.rao@example.com,Ananya Rao,+919800000001,KRT-LIN-M-IND,Linen Kurta,M / Indigo,Apparel,1,1899",
-  "1001,2026-09-02,delivered,prepaid,INR,2026-09-06,ananya.rao@example.com,Ananya Rao,+919800000001,DUP-SLK-RST,Silk Dupatta,Rust,Accessories,2,749",
-  "1002,2026-09-03,fulfilled,cod,INR,,vikram.s@example.com,Vikram S,,SNK-CNV-42-WHT,Canvas Sneakers,UK 8 / White,Footwear,1,2499",
+  "1001,2026-09-02,delivered,prepaid,pay_Nx81kQ2LmT0aZ1,INR,2026-09-06,ananya.rao@example.com,Ananya Rao,+919800000001,KRT-LIN-M-IND,Linen Kurta,M / Indigo,Apparel,1,1899",
+  "1001,2026-09-02,delivered,prepaid,pay_Nx81kQ2LmT0aZ1,INR,2026-09-06,ananya.rao@example.com,Ananya Rao,+919800000001,DUP-SLK-RST,Silk Dupatta,Rust,Accessories,2,749",
+  "1002,2026-09-03,fulfilled,cod,,INR,,vikram.s@example.com,Vikram S,,SNK-CNV-42-WHT,Canvas Sneakers,UK 8 / White,Footwear,1,2499",
 ].join("\n") + "\n";
 
 export type CsvParseResult = {
@@ -87,6 +88,7 @@ export function parseOrdersCsv(content: string): CsvParseResult {
       placed_at: head.placed_at,
       status: head.status ? head.status.toLowerCase() : undefined,
       payment_method: head.payment_method ? head.payment_method.toLowerCase() : undefined,
+      payment_id: head.payment_id,
       currency: head.currency,
       delivered_at: head.delivered_at,
       customer: { email: head.customer_email, name: head.customer_name, phone: head.customer_phone },
