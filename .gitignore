@@ -14,3 +14,4 @@ coverage
 server/prisma/demo-build.db
 server/.demo-build-storage
 .vercel
+.env*.local

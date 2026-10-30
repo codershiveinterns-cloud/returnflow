@@ -13,7 +13,7 @@
     "db:reset": "rm -f prisma/dev.db && prisma migrate deploy && tsx prisma/seed.ts",
     "db:migrate": "prisma migrate dev",
     "postinstall": "prisma generate",
-    "build:vercel": "prisma generate && tsx scripts/build-demo-db.ts && tsc -p tsconfig.build.json"
+    "build:vercel": "prisma generate && tsx scripts/build-demo-db.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
