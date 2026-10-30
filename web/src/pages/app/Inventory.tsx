@@ -9,6 +9,7 @@ import { Badge, Code } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, EmptyState, PageHeader, Skeleton } from "@/components/ui/Card";
 import { useToast } from "@/components/ui/Toast";
+import { useCan } from "@/lib/session";
 
 type Movement = { id: string; sku: string; name: string; quantity: number; disposition: string; syncStatus: string; syncTarget: string | null; syncMessage: string | null; createdAt: string; rma: string; returnId: string };
 type Data = { summary: Record<string, number>; movements: Movement[] };
@@ -21,6 +22,7 @@ const SYNC: Record<string, [string, "done" | "danger" | "neutral" | "review"]> =
 };
 
 export function InventoryPage() {
+  const can = useCan();
   const qc = useQueryClient();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
@@ -76,7 +78,7 @@ export function InventoryPage() {
                       <td className="px-3">
                         <div className="flex items-center gap-2">
                           <Badge tone={tone}>{label}</Badge>
-                          {(m.syncStatus === "failed" || m.syncStatus === "not_connected") && m.disposition === "restock" && (
+                          {(m.syncStatus === "failed" || m.syncStatus === "not_connected") && m.disposition === "restock" && can("inspection:perform") && (
                             <Button size="sm" variant="ghost" icon={<RefreshCw className="size-3.5" />} loading={retry.isPending && retry.variables === m.id} onClick={() => retry.mutate(m.id)}>Retry</Button>
                           )}
                         </div>

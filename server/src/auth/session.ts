@@ -5,7 +5,7 @@ import { env, isProd } from "../env.js";
 export const SESSION_COOKIE = "rf_session";
 const MAX_AGE_S = 60 * 60 * 12; // 12h working session
 
-export type SessionClaims = { sub: string; org: string; mid: string };
+export type SessionClaims = { sub: string; org: string; mid: string; v?: number };
 
 export function issueSession(res: Response, claims: SessionClaims) {
   const token = jwt.sign(claims, env.SESSION_SECRET, { expiresIn: MAX_AGE_S, audience: "app" });

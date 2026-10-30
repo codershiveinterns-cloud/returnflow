@@ -76,7 +76,7 @@ const COURIER_STATUS: Record<string, CheckpointStatus> = {
   picked_up: "picked_up", pickedup: "picked_up", pickup_done: "picked_up",
   in_transit: "in_transit", intransit: "in_transit", shipped: "in_transit",
   out_for_delivery: "out_for_delivery", ofd: "out_for_delivery",
-  delivered: "delivered", rto_delivered: "delivered",
+  delivered: "delivered", rto_delivered: "failed", rto: "failed",
   failed: "failed", pickup_failed: "failed", cancelled: "failed", pickup_cancelled: "failed",
 };
 const courierBody = z.object({

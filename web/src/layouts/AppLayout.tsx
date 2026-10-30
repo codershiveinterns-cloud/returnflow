@@ -2,11 +2,16 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { LayoutGrid, Undo2, ShoppingBag, Plug, Users, Settings2, ScrollText, ExternalLink, LogOut, Menu, X, ChevronsUpDown, Lock, Truck, Workflow, Mail, ClipboardCheck, Wallet, Boxes, ShieldAlert } from "lucide-react";
+import { LayoutGrid, Undo2, ShoppingBag, Plug, Users, Settings2, ScrollText, ExternalLink, LogOut, Menu, X, ChevronsUpDown, Lock, Truck, Workflow, Mail, ClipboardCheck, Wallet, Boxes, ShieldAlert, BarChart3, KeyRound } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Permission } from "@/lib/domain";
 import { useCan, useSession, useSignOut } from "@/lib/session";
 import { Avatar, Logo } from "@/components/ui/misc";
+import { Modal } from "@/components/ui/Overlay";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Field";
+import { useToast } from "@/components/ui/Toast";
+import { ApiError } from "@/lib/api";
 
 type NavItem = { to: string; label: string; icon: typeof LayoutGrid; permission: Permission; badge?: number };
 
@@ -54,6 +59,7 @@ export function AppLayout() {
     { to: "/app/refunds", label: "Refunds", icon: Wallet, permission: "refunds:issue" },
     { to: "/app/inventory", label: "Inventory", icon: Boxes, permission: "inventory:view" },
     { to: "/app/risk", label: "Risk", icon: ShieldAlert, permission: "risk:view" },
+    { to: "/app/analytics", label: "Analytics", icon: BarChart3, permission: "analytics:view" },
     { to: "/app/orders", label: "Orders", icon: ShoppingBag, permission: "orders:view" },
   ];
   const workspace: NavItem[] = [
@@ -178,6 +184,7 @@ function UserMenu() {
   const signOut = useSignOut();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const [changing, setChanging] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
@@ -188,6 +195,9 @@ function UserMenu() {
     <div ref={ref} className="relative border-t border-white/[0.06] p-2">
       {open && (
         <div className="absolute bottom-full left-2 right-2 mb-1 rounded-lg bg-[#1d2025] border border-white/10 p-1 shadow-xl animate-rise">
+          <button onClick={() => { setOpen(false); setChanging(true); }} className="flex w-full items-center gap-2 h-8 px-2.5 rounded-md text-[13px] hover:bg-white/5 text-white">
+            <KeyRound className="size-4" /> Change password
+          </button>
           <button
             onClick={async () => {
               await signOut();
@@ -206,6 +216,43 @@ function UserMenu() {
           <div className="text-[11.5px] text-[#8b877f] truncate">{user.email}</div>
         </div>
       </button>
+      {changing && <PasswordModal onClose={() => setChanging(false)} />}
     </div>
+  );
+}
+
+function PasswordModal({ onClose }: { onClose: () => void }) {
+  const toast = useToast();
+  const [form, setForm] = useState({ current: "", next: "" });
+  const [error, setError] = useState<ApiError | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/auth/password", { method: "POST", body: form });
+      toast.success("Password changed — other devices have been signed out");
+      onClose();
+    } catch (e) {
+      setError(e instanceof ApiError ? e : new ApiError(0, "Something went wrong"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      size="sm"
+      title="Change password"
+      description="You'll stay signed in here; every other device is signed out."
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button loading={busy} onClick={submit}>Change password</Button></>}
+    >
+      <div className="space-y-4">
+        {error && !error.fields && <div className="rounded-lg bg-danger-bg text-danger text-[13px] px-3.5 py-2.5">{error.message}</div>}
+        <Input label="Current password" type="password" autoComplete="current-password" value={form.current} onChange={(e) => setForm({ ...form, current: e.target.value })} error={error?.fieldError("current")} />
+        <Input label="New password" type="password" autoComplete="new-password" value={form.next} onChange={(e) => setForm({ ...form, next: e.target.value })} error={error?.fieldError("next")} hint="At least 8 characters" />
+      </div>
+    </Modal>
   );
 }

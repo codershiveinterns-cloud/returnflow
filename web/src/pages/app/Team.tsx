@@ -34,6 +34,7 @@ const PERMISSION_LABEL: Record<string, string> = {
   "refunds:issue": "Issue refunds, credit & replacements",
   "inventory:view": "Inventory & restock sync",
   "risk:view": "Risk & pattern detection",
+  "analytics:view": "Analytics & reports",
   "integrations:manage": "Manage order sync & API keys",
   "team:view": "View team",
   "team:manage": "Manage team",

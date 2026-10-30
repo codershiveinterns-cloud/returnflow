@@ -1,4 +1,6 @@
 import express, { Router } from "express";
+import fs from "node:fs";
+import path from "node:path";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import helmet from "helmet";
@@ -23,12 +25,22 @@ import { rulesRouter } from "./routes/rules.js";
 import { pickupsRouter } from "./routes/pickups.js";
 import { notificationsRouter } from "./routes/notifications.js";
 import { workRouter } from "./routes/work.js";
+import { analyticsRouter } from "./routes/analytics.js";
+import { contactRouter } from "./routes/contact.js";
 
 export function createApp() {
   const app = express();
   app.set("trust proxy", 1);
   app.disable("x-powered-by");
-  app.use(helmet({ crossOriginResourcePolicy: { policy: "same-site" } }));
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: "same-site" },
+      // The API only returns JSON, files and PDFs — nothing should execute or be framed.
+      contentSecurityPolicy: { useDefaults: false, directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"], imgSrc: ["'self'"], styleSrc: ["'unsafe-inline'"] } },
+      strictTransportSecurity: { maxAge: 31536000, includeSubDomains: true },
+      referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    }),
+  );
   app.use(cors({ origin: env.APP_URL, credentials: true }));
   if (env.NODE_ENV !== "test") app.use(morgan("dev"));
   app.use(
@@ -52,6 +64,7 @@ export function createApp() {
   app.use("/api/portal", portalRouter);
   app.use("/api/webhooks", webhooksRouter);
   app.use("/api/v1", publicApiRouter);
+  app.use("/api/public/contact", contactRouter);
   app.use("/api/public", publicAssetsRouter);
   app.use("/api/files", filesRouter);
 
@@ -69,7 +82,26 @@ export function createApp() {
   consoleApi.use("/pickups", pickupsRouter);
   consoleApi.use("/notifications", notificationsRouter);
   consoleApi.use("/work", workRouter);
+  consoleApi.use("/analytics", analyticsRouter);
   app.use("/api", consoleApi);
+
+  // Single-server deployments (VPS): serve the built web app from the same origin.
+  const webDist = process.env.WEB_DIST ? path.resolve(process.env.WEB_DIST) : null;
+  if (webDist && fs.existsSync(path.join(webDist, "index.html"))) {
+    const spaHeaders = (res: express.Response) => {
+      res.setHeader(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+      );
+      res.setHeader("X-Content-Type-Options", "nosniff");
+    };
+    app.use(express.static(webDist, { index: false, maxAge: "1y", immutable: true, setHeaders: (res, file) => file.endsWith(".html") && res.setHeader("Cache-Control", "no-cache") }));
+    app.get(/^(?!\/api\/).*/, (_req, res) => {
+      spaHeaders(res);
+      res.setHeader("Cache-Control", "no-cache");
+      res.sendFile(path.join(webDist, "index.html"));
+    });
+  }
 
   app.use(notFoundHandler);
   app.use(errorHandler);

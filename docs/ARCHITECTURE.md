@@ -1,4 +1,4 @@
-# ReturnFlow — Architecture (Milestone 1)
+# ReturnFlow — Architecture
 
 ## Shape of the system
 
@@ -126,3 +126,21 @@ eligibility engine (window, categories, value, history) is Milestone 2.
 * Move the in-memory rate limiter to Redis when running more than one node.
 * Serve `web/dist` from the same origin as the API (or a CDN with `/api`
   routed to the server) so the session cookie stays first-party.
+
+## Milestones 2–4 modules
+
+| Module | Responsibility |
+|---|---|
+| `returns/eligibility.ts` | Policy checks (window, category, order status, value, history, evidence) → auto-approve / auto-reject / review |
+| `returns/rules.ts` | IF/THEN rule model, condition evaluation, rule preview context |
+| `returns/risk.ts` | Additive, explainable 0–100 risk score; high risk holds the refund until inspection |
+| `returns/service.ts` | Single entry point for every state change → timeline event + audit entry + notification |
+| `returns/resolution.ts` | Receive, inspect (with AI suggestion), inventory movement + restock sync, refunds/credit/replacement |
+| `ai/index.ts` | Claude (structured outputs, vision) when `ANTHROPIC_API_KEY` is set; deterministic rules otherwise |
+| `payments/razorpay.ts` | Refund API client; test mode simulates the gateway |
+| `inventory/shopifySync.ts` | Admin GraphQL `inventoryAdjustQuantities` restock |
+| `notify/` | Branded email templates (SMTP), signed SMS/WhatsApp hook, outbox for every message |
+| `routes/analytics.ts` | KPIs, reasons, products, stage timings; CSV (formula-safe) and PDF exports |
+| `routes/work.ts` | Role queues: inspection, refunds, inventory, risk & pattern detection |
+
+Large reads use paged queries (`lib/batch.ts`) so analytics stays fast and within SQLite's parameter limit; measured at < 0.5 s on 4,000 returns.

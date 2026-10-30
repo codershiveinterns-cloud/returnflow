@@ -25,7 +25,7 @@ import { ingestOrders, recordSync } from "../src/orders/ingest.js";
 import { mapShopifyOrder } from "../src/orders/shopify.js";
 import { sandboxOrders } from "../src/orders/shopifySandbox.js";
 import type { OrderInput } from "../src/orders/schema.js";
-import { createReturn, flushAi, recordCheckpoint, schedulePickup } from "../src/returns/service.js";
+import { approveReturn, createReturn, flushAi, recordCheckpoint, schedulePickup } from "../src/returns/service.js";
 import { recordInspection, resolveReturn, suggestCondition } from "../src/returns/resolution.js";
 import { flushNotifications } from "../src/notify/index.js";
 
@@ -230,6 +230,14 @@ async function main() {
     await inspectAll(created["1023"], { packaging: "pass", tags: "fail", damage: "pass", usage: "pass" }, "B", "refurbish", "Swing tag missing, garment fine");
   });
   await tryStep(() => deliver(created["1025"], "Ecom Express", "EC77810045", "Hyderabad"));
+  // A delivered return refunded through Razorpay (test mode)
+  await tryStep(async () => {
+    const mgr = await db.user.findUniqueOrThrow({ where: { email: "manager@kaveri.test" } });
+    await approveReturn({ orgId: kaveri.id, actor: { type: "user", id: mgr.id, label: mgr.name }, role: "manager", userId: mgr.id }, created["1016"], "Photos confirm the wrong colour was sent");
+    await deliver(created["1016"], "Delhivery", "7751093901", "Mumbai");
+    await inspectAll(created["1016"], allPass, "A", "restock");
+    await resolveReturn(finance, created["1016"], { kind: "refund", method: "razorpay" });
+  });
 
   // Booking happened before the courier events above; date the "scheduled" checkpoints accordingly.
   for (const sh of await db.shipment.findMany({ where: { organizationId: kaveri.id }, include: { checkpoints: true } })) {
@@ -239,6 +247,22 @@ async function main() {
   }
   await flushNotifications();
   await flushAi();
+
+  // Seeding runs in seconds; spread each return's history over realistic gaps
+  // (decision, pickup, transit, inspection, resolution) so analytics reflect real timings.
+  const GAP_HOURS: Record<string, number> = { approved: 3, rejected: 3, pickup_scheduled: 26, in_transit: 44, received: 86, inspected: 100, refunded: 118, replaced: 118 };
+  for (const r of await db.returnRequest.findMany({ where: { organizationId: kaveri.id }, include: { events: true, refunds: true } })) {
+    const t0 = r.createdAt.getTime();
+    const span = Math.max(0, Date.now() - t0 - 36e5);
+    const at = (h: number) => new Date(t0 + Math.min(h * 36e5, span * (h / 120)));
+    for (const e of r.events) {
+      const h = e.status ? GAP_HOURS[e.status] : undefined;
+      if (h !== undefined) await db.returnEvent.update({ where: { id: e.id }, data: { createdAt: at(h) } });
+      else if (e.type !== "status" && e.createdAt.getTime() > t0 + span) await db.returnEvent.update({ where: { id: e.id }, data: { createdAt: at(e.message.startsWith("Inspected") ? 95 : 2) } });
+    }
+    if (r.resolvedAt) await db.returnRequest.update({ where: { id: r.id }, data: { resolvedAt: at(118), decidedAt: r.decidedAt ? at(3) : undefined } });
+    for (const f of r.refunds) await db.refund.update({ where: { id: f.id }, data: { createdAt: at(118), processedAt: at(118) } });
+  }
 
   // Second tenant: proves isolation (its data must never appear in Kaveri's console)
   const northwind = await createWorkspace("Northwind Outfitters", "northwind", [["Leo Fernandes", "admin@northwind.test", "admin"]], "#1d4d4f");

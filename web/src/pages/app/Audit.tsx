@@ -27,6 +27,31 @@ const ACTIONS: Record<string, string> = {
   "team.member_updated": "Changed a teammate's access",
   "settings.updated": "Updated portal settings",
   "settings.logo_updated": "Uploaded a new logo",
+  "settings.policy_updated": "Updated the return policy",
+  "settings.messaging_updated": "Updated SMS / WhatsApp settings",
+  "auth.login_failed": "Failed sign-in attempt",
+  "auth.password_changed": "Changed their password",
+  "auth.signed_out_everywhere": "Signed out on all devices",
+  "return.auto_approved": "Approved a return automatically",
+  "return.auto_rejected": "Rejected a return automatically",
+  "return.approved": "Approved a return",
+  "return.rejected": "Rejected a return",
+  "return.override_approved": "Overrode a rejection",
+  "return.escalated": "Escalated a return",
+  "return.pickup_scheduled": "Scheduled a pickup",
+  "return.tracking_updated": "Updated tracking",
+  "return.received": "Received a parcel",
+  "return.inspected": "Inspected an item",
+  "inventory.movement": "Recorded a stock movement",
+  "refund.issued": "Issued a refund / credit / replacement",
+  "refund.failed": "Refund attempt failed",
+  "rule.created": "Created a rule",
+  "rule.updated": "Edited a rule",
+  "rule.enabled": "Enabled a rule",
+  "rule.disabled": "Disabled a rule",
+  "rule.deleted": "Deleted a rule",
+  "report.exported": "Exported a report",
+  "integration.razorpay_connected": "Connected Razorpay",
 };
 
 const ACTOR_TONE: Record<string, string> = { user: "bg-ink text-white", customer: "bg-kraft-soft text-kraft-ink", api_key: "bg-progress-bg text-progress", system: "bg-paper-2 text-muted" };
@@ -60,9 +85,15 @@ export function AuditPage() {
         title="Audit log"
         description="An append-only record of who did what and when — sign-ins, order imports, key changes, settings and every return request."
         actions={
+          <div className="flex items-center gap-2">
+          <a href="/api/audit/export.csv?days=90" className="inline-flex items-center h-10 px-3.5 rounded-lg border border-line-strong bg-surface text-[13.5px] font-medium hover:bg-paper whitespace-nowrap">Export CSV</a>
           <Select value={action} onChange={(e) => { setAction(e.target.value); setPage(1); }} className="w-52" aria-label="Filter">
             <option value="">All activity</option>
             <option value="return.">Returns</option>
+            <option value="refund.">Refunds</option>
+            <option value="rule.">Rules</option>
+            <option value="inventory.">Inventory</option>
+            <option value="report.">Exports</option>
             <option value="orders.">Order imports</option>
             <option value="integration.">Integrations</option>
             <option value="api_key.">API keys</option>
@@ -70,6 +101,7 @@ export function AuditPage() {
             <option value="auth.">Sign-ins</option>
             <option value="settings.">Settings</option>
           </Select>
+          </div>
         }
       />
       <Card className="overflow-hidden">

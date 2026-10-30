@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
@@ -17,7 +18,9 @@ function sqliteUrl(url: string) {
  */
 function databaseFile() {
   if (!onVercelRuntime) return sqliteUrl(env.DATABASE_URL);
-  const target = "/tmp/returnflow.db";
+  // Name the file after the snapshot's contents so a new build never reuses an older schema's file.
+  const version = crypto.createHash("sha256").update(DEMO_DB_BASE64).digest("hex").slice(0, 12);
+  const target = `/tmp/returnflow-${version}.db`;
   if (!fs.existsSync(target) && DEMO_DB_BASE64) fs.writeFileSync(target, Buffer.from(DEMO_DB_BASE64, "base64"));
   return target;
 }

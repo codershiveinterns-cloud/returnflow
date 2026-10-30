@@ -7,6 +7,9 @@ import { badRequest } from "../lib/errors.js";
 import { IMAGE_TYPES, putFile } from "../lib/storage.js";
 import { auth, requirePermission } from "../auth/middleware.js";
 import { orgPublic } from "./shared.js";
+import { encrypt, decrypt, randomToken } from "../lib/crypto.js";
+import { sendMessagingHook } from "../notify/index.js";
+import { assertPublicUrl } from "../lib/netguard.js";
 import { parseList } from "../returns/eligibility.js";
 import type { Organization } from "../generated/prisma/client.js";
 
@@ -90,4 +93,60 @@ settingsRouter.post("/organization/logo", requirePermission("settings:manage"), 
 settingsRouter.delete("/organization/logo", requirePermission("settings:manage"), async (req, res) => {
   const org = await db.organization.update({ where: { id: auth(req).orgId }, data: { logoKey: null } });
   res.json(orgPublic(org));
+});
+
+// ───────────── SMS / WhatsApp hook ─────────────
+
+const messagingView = (o: Organization) => ({
+  url: o.messagingHookUrl,
+  channels: parseList(o.messagingChannels),
+  secretPreview: o.messagingHookSecretEnc ? `${decrypt(o.messagingHookSecretEnc).slice(0, 10)}••••••` : null,
+});
+
+settingsRouter.get("/messaging", requirePermission("settings:manage"), async (req, res) => {
+  res.json(messagingView(await db.organization.findUniqueOrThrow({ where: { id: auth(req).orgId } })));
+});
+
+const messagingBody = z.object({
+  url: z.union([z.string().trim().url("Enter a full https:// URL").refine((u) => u.startsWith("https://") || process.env.NODE_ENV !== "production", "Use an https:// URL"), z.literal("")]),
+  channels: z.array(z.enum(["sms", "whatsapp"])).max(2),
+});
+
+settingsRouter.put("/messaging", requirePermission("settings:manage"), async (req, res) => {
+  const a = auth(req);
+  const body = messagingBody.parse(req.body);
+  if (body.url) {
+    try {
+      await assertPublicUrl(body.url);
+    } catch (e) {
+      throw badRequest(e instanceof Error ? e.message : "Invalid URL");
+    }
+  }
+  const current = await db.organization.findUniqueOrThrow({ where: { id: a.orgId } });
+  const org = await db.organization.update({
+    where: { id: a.orgId },
+    data: {
+      messagingHookUrl: body.url || null,
+      messagingChannels: JSON.stringify(body.url ? [...new Set(body.channels)] : []),
+      messagingHookSecretEnc: current.messagingHookSecretEnc ?? encrypt(`mhsec_${randomToken(24)}`),
+    },
+  });
+  await audit({ organizationId: a.orgId, actor: a.actor, action: "settings.messaging_updated", meta: { url: body.url, channels: body.channels }, req });
+  res.json(messagingView(org));
+});
+
+settingsRouter.post("/messaging/reveal", requirePermission("settings:manage"), async (req, res) => {
+  const a = auth(req);
+  const org = await db.organization.findUniqueOrThrow({ where: { id: a.orgId } });
+  await audit({ organizationId: a.orgId, actor: a.actor, action: "settings.messaging_secret_revealed", req });
+  res.json({ secret: org.messagingHookSecretEnc ? decrypt(org.messagingHookSecretEnc) : null });
+});
+
+settingsRouter.post("/messaging/test", requirePermission("settings:manage"), async (req, res) => {
+  const a = auth(req);
+  const { phone } = z.object({ phone: z.string().trim().min(7, "Enter a phone number").max(20) }).parse(req.body);
+  const org = await db.organization.findUniqueOrThrow({ where: { id: a.orgId } });
+  const results = await sendMessagingHook(org, null, phone, "test", `${org.name}: this is a test message from ReturnFlow.`);
+  if (!results.length) throw badRequest("Add a hook URL and enable at least one channel first");
+  res.json({ results });
 });

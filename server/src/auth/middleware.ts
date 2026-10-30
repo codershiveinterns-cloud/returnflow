@@ -33,9 +33,10 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
   if (!claims) return next(unauthorized());
   const membership = await db.membership.findUnique({
     where: { id: claims.mid },
-    include: { user: { select: { id: true, name: true, email: true } } },
+    include: { user: { select: { id: true, name: true, email: true, sessionVersion: true } } },
   });
   if (!membership || membership.userId !== claims.sub || membership.organizationId !== claims.org) return next(unauthorized());
+  if ((claims.v ?? 0) !== membership.user.sessionVersion) return next(unauthorized("Your session has ended. Sign in again."));
   if (membership.status !== "active") return next(forbidden("Your access to this workspace has been disabled"));
   if (!isRole(membership.role)) return next(forbidden());
   req.auth = {

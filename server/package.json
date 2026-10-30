@@ -13,7 +13,7 @@
     "db:reset": "rm -f prisma/dev.db && prisma migrate deploy && tsx prisma/seed.ts",
     "db:migrate": "prisma migrate dev",
     "postinstall": "prisma generate",
-    "build:vercel": "prisma generate && tsx scripts/build-demo-db.ts"
+    "build:vercel": "prisma generate && tsx scripts/build-demo-db.ts && tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
@@ -32,6 +32,7 @@
     "multer": "^2.4.0",
     "nanoid": "^6.0.1",
     "nodemailer": "^10.0.13",
+    "pdfkit": "^0.20.2",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -44,6 +45,7 @@
     "@types/multer": "^2.3.0",
     "@types/node": "^26.6.3",
     "@types/nodemailer": "^8.0.2",
+    "@types/pdfkit": "^0.17.6",
     "@types/supertest": "^7.2.1",
     "prisma": "^7.10.0",
     "supertest": "^7.3.0",

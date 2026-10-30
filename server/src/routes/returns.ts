@@ -281,7 +281,7 @@ const resolveBody = z.object({
   amount: z.coerce.number().nonnegative().optional(),
   reference: z.string().trim().max(80).optional(),
   note: z.string().trim().max(500).optional(),
-});
+}).refine((b) => ({ refund: ["razorpay", "manual"], store_credit: ["store_credit"], replacement: ["replacement"] })[b.kind].includes(b.method), { message: "That payout method doesn't match the resolution type", path: ["method"] });
 
 returnsRouter.post("/:id/resolve", requirePermission("refunds:issue"), async (req, res) => {
   const refund = await resolveReturn(staff(req), param(req.params.id), resolveBody.parse(req.body));

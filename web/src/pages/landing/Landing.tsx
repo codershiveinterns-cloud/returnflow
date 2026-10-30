@@ -8,11 +8,11 @@ import { ReturnLabel } from "./mocks";
 import { ChaosToOrder, Developers, Faq, Features, Journey, Roles, Security, Ticker } from "./sections";
 
 const NAV = [
-  ["How it works", "#how"],
-  ["Product", "#product"],
-  ["Teams", "#teams"],
-  ["Integrations", "#integrations"],
-  ["FAQ", "#faq"],
+  ["How it works", "/#how"],
+  ["Product", "/#product"],
+  ["Teams", "/#teams"],
+  ["Integrations", "/#integrations"],
+  ["Contact", "/contact"],
 ];
 
 export function LandingPage() {
@@ -44,7 +44,7 @@ export function LandingPage() {
   );
 }
 
-function Nav({ signedIn, primary }: { signedIn: boolean; primary: { to: string; label: string } }) {
+export function Nav({ signedIn, primary }: { signedIn: boolean; primary: { to: string; label: string } }) {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -142,7 +142,7 @@ function Hero({ primary }: { primary: { to: string; label: string } }) {
 
         <div className={clsx("relative mx-auto w-[calc(100%-16px)] sm:w-full max-w-[440px] transition-all duration-[1100ms] ease-[cubic-bezier(.2,.7,.2,1)]", mounted ? "opacity-100 translate-y-0 rotate-0" : "opacity-0 translate-y-10 rotate-2")} style={{ transitionDelay: "200ms" }}>
           <ReturnLabel />
-          <FloatingChip className="-left-4 sm:-left-16 top-[54%]" delay="0s" rotate="-4deg">
+          <FloatingChip className="-left-4 sm:-left-20 top-[47%]" delay="0s" rotate="-4deg">
             <Camera className="size-3.5 text-kraft-ink" /> 2 photos attached
           </FloatingChip>
           <FloatingChip className="-right-2 sm:-right-12 -top-7" delay="-2s" rotate="3deg">
@@ -165,7 +165,7 @@ function FloatingChip({ children, className, delay, rotate }: { children: React.
   );
 }
 
-function FinalCta({ primary }: { primary: { to: string; label: string } }) {
+export function FinalCta({ primary }: { primary: { to: string; label: string } }) {
   return (
     <section className="relative bg-[#131519] text-white overflow-hidden">
       <div className="h-6 bg-tape" aria-hidden />
@@ -188,7 +188,7 @@ function FinalCta({ primary }: { primary: { to: string; label: string } }) {
   );
 }
 
-function Footer() {
+export function Footer() {
   return (
     <footer className="bg-[#0f1113] text-[#a9a59c]">
       <div className="max-w-[1200px] mx-auto px-5 sm:px-8 py-14 grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.5fr_1fr_1fr_1fr]">
@@ -197,15 +197,15 @@ function Footer() {
           <p className="mt-4 text-[14px] max-w-[280px] leading-relaxed">Reverse logistics for modern commerce. Portal, workflow, inspection and refunds in one place.</p>
         </div>
         {[
-          ["Product", [["How it works", "#how"], ["Customer portal", "#product"], ["Teams", "#teams"], ["Integrations", "#integrations"]]],
-          ["Company", [["Security", "#security"], ["FAQ", "#faq"], ["Contact", "mailto:hello@returnflow.app"]]],
-          ["Get started", [["Create a workspace", "/signup"], ["Sign in", "/login"], ["Customer portal", "/r/kaveri"]]],
+          ["Product", [["How it works", "/#how"], ["Customer portal", "/#product"], ["Integrations", "/#integrations"], ["Security", "/security"]]],
+          ["Company", [["About", "/about"], ["Contact us", "/contact"], ["FAQ", "/#faq"], ["Sign in", "/login"]]],
+          ["Legal", [["Privacy Policy", "/privacy"], ["Terms of Service", "/terms"], ["Cookie Policy", "/cookies"], ["Refund & Cancellation", "/refund-policy"]]],
         ].map(([title, links]) => (
           <div key={title as string}>
             <div className="font-mono text-[11px] tracking-[0.14em] uppercase text-[#6f6c66]">{title as string}</div>
             <ul className="mt-4 space-y-2.5 text-[14px]">
               {(links as string[][]).map(([l, h]) => (
-                <li key={l}>{h.startsWith("/") ? <Link to={h} className="hover:text-white transition-colors">{l}</Link> : <a href={h} className="hover:text-white transition-colors">{l}</a>}</li>
+                <li key={l}>{h.startsWith("/") && !h.includes("#") ? <Link to={h} className="hover:text-white transition-colors">{l}</Link> : <a href={h} className="hover:text-white transition-colors">{l}</a>}</li>
               ))}
             </ul>
           </div>
@@ -213,8 +213,8 @@ function Footer() {
       </div>
       <div className="border-t border-white/[0.06]">
         <div className="max-w-[1200px] mx-auto px-5 sm:px-8 h-14 flex items-center justify-between text-[12.5px] text-[#6f6c66]">
-          <span>© {new Date().getFullYear()} ReturnFlow</span>
-          <span className="font-mono">RF-∞ · handled</span>
+          <span>© {new Date().getFullYear()} ReturnFlow. All rights reserved.</span>
+          <span className="flex gap-4"><Link to="/privacy" className="hover:text-white">Privacy</Link><Link to="/terms" className="hover:text-white">Terms</Link><Link to="/cookies" className="hover:text-white">Cookies</Link></span>
         </div>
       </div>
     </footer>

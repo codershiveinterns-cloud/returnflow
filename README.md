@@ -4,9 +4,8 @@ Multi-tenant reverse-logistics SaaS: a branded customer return portal, order
 sync from Shopify / API / CSV, and one operations console for support,
 warehouse, managers and finance.
 
-**Status: Milestone 1 (foundation)** — auth & roles, multi-tenant data model,
-order sync (Shopify, REST API, signed webhook, CSV), customer return portal,
-and the console UI shell. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+**Status: complete (Milestones 1–4).** See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md),
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) and [`docs/HANDOVER.md`](docs/HANDOVER.md).
 
 ## Quick start
 
@@ -31,7 +30,7 @@ listed at the top of [`server/prisma/seed.ts`](server/prisma/seed.ts).
 | Kaveri & Co. | `/r/kaveri` | one user per role (admin, manager, support, warehouse, finance) |
 | Northwind Outfitters | `/r/northwind` | admin |
 
-Portal test order: **#1001** with `ananya.rao@example.com` (or phone `98000 00001`).
+Portal test order: **#1029** with `neha.joshi@example.com` (or phone `98000 00009`).
 
 `npm run db:reset` wipes and re-seeds the local database.
 
@@ -59,6 +58,8 @@ real deployment, move to PostgreSQL and object storage (see
 | `npm test` | API integration tests (Vitest + Supertest, isolated test DB) |
 | `npm run typecheck` | TypeScript across both apps |
 | `npm run build` | Compile API to `server/dist`, bundle web to `web/dist` |
+| `npx tsx server/scripts/perf.ts` | Load test on 6,000 orders / 4,000 returns (target < 2 s) |
+| `node scripts/smoke.mjs <url> <email> <password> <slug>` | Post-deploy smoke test |
 
 ## Layout
 
@@ -75,17 +76,16 @@ web/
   src/layouts/       auth gate, app shell
   src/pages/app/     console pages
   src/pages/portal/  customer portal + tracking
-docs/ARCHITECTURE.md
+docs/            ARCHITECTURE, DEPLOYMENT, HANDOVER, ci-workflow.yml
+deploy/          nginx, PM2, backup script, production env template
+scripts/         smoke test
 ```
 
-## Milestone 1 checklist
+## What's included
 
-- [x] Architecture: multi-tenant model, schema, return status flow (`docs/ARCHITECTURE.md`)
-- [x] Scaffolding: monorepo, TypeScript, CI workflow (ready to enable: copy `docs/ci-workflow.yml` to `.github/workflows/ci.yml`)
-- [x] Email/password auth, 5 staff roles, server-enforced permissions
-- [x] Order sync: Shopify (pull + HMAC webhooks, sandbox mode), REST API with keys, signed webhook, CSV with preview
-- [x] Customer portal: order lookup, item & quantity selection, reason, photo upload, refund / store credit / replacement, confirmation and tracking
-- [x] Console shell & design system: overview, returns queue + detail, orders, order sync, team & roles, portal branding, audit log
-
-Next (Milestone 2): eligibility rules engine, approve/reject/escalate workflow,
-automation rules builder, pickup & courier tracking, email notifications.
+| Milestone | Delivered |
+|---|---|
+| 1 · Foundation | Multi-tenant model, auth & 5 roles, order sync (Shopify, REST API, signed webhook, CSV), branded customer portal with photos & tracking, console shell, landing page |
+| 2 · Workflow | Eligibility engine, review queue (approve / reject / escalate / override), IF/THEN rules builder with preview, pickup & courier tracking (manual + signed webhook), customer email notifications |
+| 3 · Resolution | Mobile inspection (checklist, photos, grade, disposition), refunds via Razorpay / bank-UPI / store credit / replacement, inventory & Shopify restock sync, AI reason & condition analysis, risk scoring & pattern detection |
+| 4 · Go-live | Analytics dashboard, CSV/PDF reports, audit export, SMS/WhatsApp hook, security hardening, performance (paged queries, code-split UI), deployment configs, smoke test, handover docs |

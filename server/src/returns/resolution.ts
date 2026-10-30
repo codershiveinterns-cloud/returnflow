@@ -1,13 +1,13 @@
 import { db } from "../db.js";
 import { audit, type Actor } from "../lib/audit.js";
-import { badRequest, notFound } from "../lib/errors.js";
+import { badRequest, HttpError, notFound } from "../lib/errors.js";
 import { decryptJson, randomToken } from "../lib/crypto.js";
 import type { Role } from "../auth/rbac.js";
 import { analyzeCondition, type Checklist, type ConditionAnalysis } from "../ai/index.js";
 import { restockOnShopify } from "../inventory/shopifySync.js";
 import { queueNotification } from "../notify/index.js";
 import type { ShopifyConfig } from "../orders/shopify.js";
-import { refundPayment, simulateRefund, type RazorpayConfig } from "../payments/razorpay.js";
+import { GatewayRejected, refundPayment, simulateRefund, type RazorpayConfig } from "../payments/razorpay.js";
 import { rma } from "../routes/shared.js";
 import { moveTo } from "./service.js";
 
@@ -76,6 +76,7 @@ export async function recordInspection(s: StaffCtx, id: string, itemId: string, 
   const mismatch = !!input.aiSuggestion?.mismatch;
   const remaining = r.items.filter((i) => !i.inspection && i.id !== itemId).length;
   let movementId = "";
+  let completed = false;
 
   await db.$transaction(async (tx) => {
     for (const p of input.photos) {
@@ -120,22 +121,27 @@ export async function recordInspection(s: StaffCtx, id: string, itemId: string, 
         actorLabel: s.actor.label,
       },
     });
-    if (remaining === 0 && r.status === "received") {
-      await moveTo(tx, r, "inspected", s.actor, `Inspection complete (${r.items.length} item${r.items.length === 1 ? "" : "s"})`);
+    // Recount inside the transaction so two inspectors finishing at once still close the inspection.
+    const left = await tx.returnItem.count({ where: { returnId: r.id, inspection: null } });
+    const fresh = await tx.returnRequest.findUniqueOrThrow({ where: { id: r.id }, select: { status: true } });
+    if (left === 0 && fresh.status === "received") {
+      await moveTo(tx, { ...r, status: fresh.status }, "inspected", s.actor, `Inspection complete (${r.items.length} item${r.items.length === 1 ? "" : "s"})`);
+      completed = true;
     }
     await audit({ organizationId: s.orgId, actor: s.actor, action: "return.inspected", entityType: "return", entityId: r.id, meta: { rma: rma(r.number), sku: item.orderItem.sku, grade: input.grade, disposition: input.disposition, mismatch, aiGrade: input.aiSuggestion?.grade }, req: s.req }, tx);
     await audit({ organizationId: s.orgId, actor: s.actor, action: "inventory.movement", entityType: "inventory", entityId: mv.id, meta: { rma: rma(r.number), sku: item.orderItem.sku, quantity: item.quantity, disposition: input.disposition } }, tx);
   });
 
   if (input.disposition === "restock") await syncRestock(s.orgId, movementId);
-  if (remaining === 0 && r.status === "inspected") queueNotification(r.id, "inspected");
+  if (completed) queueNotification(r.id, "inspected");
   return { complete: remaining === 0 };
 }
 
 /** Pushes a restock to the connected store. Safe to retry. */
 export async function syncRestock(orgId: string, movementId: string) {
   const mv = await db.inventoryMovement.findFirst({ where: { id: movementId, organizationId: orgId } });
-  if (!mv || mv.disposition !== "restock") return;
+  // Shopify adjustments are deltas — never send the same restock twice.
+  if (!mv || mv.disposition !== "restock" || mv.syncStatus === "synced") return;
   const shop = await db.integration.findUnique({ where: { organizationId_provider: { organizationId: orgId, provider: "shopify" } } });
   if (!shop) {
     await db.inventoryMovement.update({ where: { id: mv.id }, data: { syncStatus: "not_connected", syncMessage: "Connect a store to sync stock automatically" } });
@@ -170,77 +176,93 @@ export function canResolve(r: { status: string; holdRefund: boolean; riskLevel: 
   return { ok: false as const, why: "Returns can be resolved once they're received at the warehouse" };
 }
 
+const VALID_METHODS: Record<ResolveInput["kind"], ResolveInput["method"][]> = {
+  refund: ["razorpay", "manual"],
+  store_credit: ["store_credit"],
+  replacement: ["replacement"],
+};
+
 export async function resolveReturn(s: StaffCtx, id: string, input: ResolveInput) {
+  if (!VALID_METHODS[input.kind]?.includes(input.method)) throw badRequest("That payout method doesn't match the resolution type");
   const r = await loadReturn(s.orgId, id);
   const gate = canResolve(r);
   if (!gate.ok) throw badRequest(gate.why);
   if (r.refunds.some((x) => x.status !== "failed")) throw badRequest("This return has already been resolved");
 
-  const amountMinor = input.amount !== undefined ? Math.round(input.amount * 100) : r.valueMinor;
+  const amountMinor = input.kind === "replacement" ? 0 : input.amount !== undefined ? Math.round(input.amount * 100) : r.valueMinor;
   if (amountMinor <= 0 && input.kind !== "replacement") throw badRequest("Amount must be more than zero");
   if (amountMinor > r.valueMinor) throw badRequest(`Amount can't exceed the return value (${money(r.valueMinor, r.currency)})`);
+  if (input.kind === "refund" && input.method === "manual" && !input.reference?.trim()) throw badRequest("Add the bank / UPI transaction reference");
+  if (input.kind === "replacement" && !input.reference?.trim()) throw badRequest("Add the replacement order number");
 
-  let reference = input.reference?.trim() || null;
-  let gatewayMode: string | null = null;
-  let status: "processing" | "succeeded" | "failed" = "succeeded";
-  let error: string | null = null;
-
+  let gw: Awaited<ReturnType<typeof db.integration.findUnique>> = null;
   if (input.kind === "refund" && input.method === "razorpay") {
-    const gw = await db.integration.findUnique({ where: { organizationId_provider: { organizationId: s.orgId, provider: "razorpay" } } });
+    gw = await db.integration.findUnique({ where: { organizationId_provider: { organizationId: s.orgId, provider: "razorpay" } } });
     if (!gw) throw badRequest("Connect Razorpay in Integrations → Payments, or record a manual refund");
     if (!r.order.paymentRef) throw badRequest("This order has no Razorpay payment ID — record a manual refund instead");
-    try {
-      const res = gw.mode === "sandbox" ? simulateRefund(amountMinor) : await refundPayment(decryptJson<RazorpayConfig>(gw.configEnc), r.order.paymentRef, amountMinor, { rma: rma(r.number), order: r.order.orderNumber });
-      reference = res.id;
-      gatewayMode = gw.mode === "sandbox" ? "test" : "live";
-      status = res.status === "processed" ? "succeeded" : res.status === "failed" ? "failed" : "processing";
-    } catch (err) {
-      status = "failed";
-      error = err instanceof Error ? err.message : "Gateway error";
-    }
-  } else if (input.kind === "refund" && input.method === "manual") {
-    if (!reference) throw badRequest("Add the bank / UPI transaction reference");
-  } else if (input.kind === "store_credit") {
-    const org = await db.organization.findUniqueOrThrow({ where: { id: s.orgId }, select: { slug: true } });
-    reference = `${org.slug.slice(0, 3).toUpperCase()}-CR-${randomToken(6).replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 6)}`;
-  } else if (input.kind === "replacement") {
-    if (!reference) throw badRequest("Add the replacement order number");
-  } else {
-    throw badRequest("Choose how to resolve this return");
   }
 
-  const refund = await db.$transaction(async (tx) => {
-    const refund = await tx.refund.create({
-      data: {
-        organizationId: s.orgId,
-        returnId: r.id,
-        kind: input.kind,
-        method: input.method,
-        amountMinor: input.kind === "replacement" ? 0 : amountMinor,
-        currency: r.currency,
-        status,
-        reference,
-        gatewayMode,
-        note: input.note || null,
-        error,
-        createdById: s.userId,
-        createdByName: s.actor.label,
-        processedAt: status === "failed" ? null : new Date(),
-      },
+  // Claim the return so two people (or two clicks) can never pay it out twice.
+  const lock = randomToken(8);
+  const claimed = await db.returnRequest.updateMany({ where: { id: r.id, organizationId: s.orgId, resolutionLock: null, status: { in: ["received", "inspected"] } }, data: { resolutionLock: lock } });
+  if (claimed.count === 0) throw new HttpError(409, "This return is already being resolved", "conflict");
+
+  try {
+    // Re-check under the lock in case a resolution finished between our read and the claim.
+    if (await db.refund.count({ where: { returnId: r.id, status: { not: "failed" } } })) throw badRequest("This return has already been resolved");
+
+    // Record the attempt first; its id doubles as the gateway receipt for reconciliation.
+    const refund = await db.refund.create({
+      data: { organizationId: s.orgId, returnId: r.id, kind: input.kind, method: input.method, amountMinor, currency: r.currency, status: "processing", note: input.note || null, createdById: s.userId, createdByName: s.actor.label },
     });
-    if (status !== "failed") {
-      const to = input.kind === "replacement" ? "replaced" : "refunded";
-      const what = input.kind === "replacement" ? `Replacement sent · order ${reference}` : input.kind === "store_credit" ? `Store credit of ${money(amountMinor, r.currency)} issued · ${reference}` : `Refund of ${money(amountMinor, r.currency)} ${status === "processing" ? "initiated" : "issued"}${gatewayMode === "test" ? " (test mode)" : ""} · ${reference}`;
-      await moveTo(tx, r, to, s.actor, what, { resolvedAt: new Date() });
-    }
-    await audit({ organizationId: s.orgId, actor: s.actor, action: status === "failed" ? "refund.failed" : "refund.issued", entityType: "refund", entityId: refund.id, meta: { rma: rma(r.number), kind: input.kind, method: input.method, amountMinor, reference, error, partial: amountMinor < r.valueMinor }, req: s.req }, tx);
-    return refund;
-  });
 
-  if (status !== "failed") {
-    const key = input.kind === "replacement" ? "replaced" : input.kind === "store_credit" ? "store_credit" : "refunded";
-    queueNotification(r.id, key, { amount: money(amountMinor, r.currency), reference: reference ?? undefined });
+    let reference = input.reference?.trim() || null;
+    let gatewayMode: string | null = null;
+    let status: "processing" | "succeeded" | "failed" = "succeeded";
+    let error: string | null = null;
+
+    if (gw) {
+      gatewayMode = gw.mode === "sandbox" ? "test" : "live";
+      try {
+        const res = gw.mode === "sandbox" ? simulateRefund(amountMinor) : await refundPayment(decryptJson<RazorpayConfig>(gw.configEnc), r.order.paymentRef!, amountMinor, { rma: rma(r.number), order: r.order.orderNumber }, refund.id);
+        reference = res.id;
+        status = res.status === "processed" ? "succeeded" : res.status === "failed" ? "failed" : "processing";
+      } catch (err) {
+        if (err instanceof GatewayRejected) {
+          status = "failed";
+          error = err.message;
+        } else {
+          // No answer (timeout / network): the refund may have gone through. Never allow a blind retry.
+          status = "processing";
+          error = "Razorpay didn't respond — check the Razorpay dashboard for this receipt before taking further action";
+        }
+      }
+    } else if (input.kind === "store_credit") {
+      const org = await db.organization.findUniqueOrThrow({ where: { id: s.orgId }, select: { slug: true } });
+      reference = `${org.slug.slice(0, 3).toUpperCase()}-CR-${randomToken(6).replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 6)}`;
+    }
+
+    const saved = await db.$transaction(async (tx) => {
+      const saved = await tx.refund.update({ where: { id: refund.id }, data: { status, reference: reference ?? refund.id, gatewayMode, error, processedAt: status === "failed" ? null : new Date() } });
+      if (status !== "failed") {
+        const to = input.kind === "replacement" ? "replaced" : "refunded";
+        const what =
+          input.kind === "replacement" ? `Replacement sent · order ${reference}`
+          : input.kind === "store_credit" ? `Store credit of ${money(amountMinor, r.currency)} issued · ${reference}`
+          : `Refund of ${money(amountMinor, r.currency)} ${status === "processing" ? "initiated" : "issued"}${gatewayMode === "test" ? " (test mode)" : ""} · ${reference ?? `receipt ${refund.id}`}`;
+        await moveTo(tx, r, to, s.actor, what, { resolvedAt: new Date() });
+      }
+      await audit({ organizationId: s.orgId, actor: s.actor, action: status === "failed" ? "refund.failed" : "refund.issued", entityType: "refund", entityId: refund.id, meta: { rma: rma(r.number), kind: input.kind, method: input.method, amountMinor, reference, status, error, partial: amountMinor < r.valueMinor }, req: s.req }, tx);
+      return saved;
+    });
+
+    if (status !== "failed") {
+      const key = input.kind === "replacement" ? "replaced" : input.kind === "store_credit" ? "store_credit" : "refunded";
+      queueNotification(r.id, key, { amount: money(amountMinor, r.currency), reference: reference ?? undefined });
+    }
+    if (status === "failed") throw badRequest(`Refund failed: ${error}`);
+    return saved;
+  } finally {
+    await db.returnRequest.updateMany({ where: { id: r.id, resolutionLock: lock }, data: { resolutionLock: null } });
   }
-  if (status === "failed") throw badRequest(`Refund failed: ${error}`);
-  return refund;
 }

@@ -22,15 +22,20 @@ export async function verifyRazorpay(cfg: RazorpayConfig) {
   return { mode: cfg.keyId.startsWith("rzp_live_") ? "live" : "test" };
 }
 
-export async function refundPayment(cfg: RazorpayConfig, paymentId: string, amountMinor: number, notes: Record<string, string>): Promise<RefundResult> {
+/** Razorpay answered and declined the refund — safe to correct and retry. */
+export class GatewayRejected extends Error {}
+
+/** `receipt` is our refund id: it appears in the Razorpay dashboard for reconciliation. */
+export async function refundPayment(cfg: RazorpayConfig, paymentId: string, amountMinor: number, notes: Record<string, string>, receipt: string): Promise<RefundResult> {
   const res = await fetch(`${base()}/v1/payments/${encodeURIComponent(paymentId)}/refund`, {
     method: "POST",
     headers: { Authorization: authHeader(cfg), "Content-Type": "application/json" },
-    body: JSON.stringify({ amount: amountMinor, speed: "normal", notes }),
+    body: JSON.stringify({ amount: amountMinor, speed: "normal", receipt, notes }),
     signal: AbortSignal.timeout(20_000),
   });
   const body = (await res.json().catch(() => ({}))) as { id?: string; status?: string; amount?: number; error?: { description?: string } };
-  if (!res.ok || !body.id) throw new Error(body.error?.description ?? `Razorpay refund failed (${res.status})`);
+  if (res.status >= 400 && res.status < 500) throw new GatewayRejected(body.error?.description ?? `Razorpay declined the refund (${res.status})`);
+  if (!res.ok || !body.id) throw new Error(`Razorpay returned ${res.status}`); // 5xx: outcome unknown
   return { id: body.id, status: (body.status as RefundResult["status"]) ?? "pending", amountMinor: body.amount ?? amountMinor };
 }
 

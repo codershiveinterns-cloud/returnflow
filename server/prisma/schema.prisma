@@ -45,6 +45,10 @@ model Organization {
   autoApproveMaxMinor     Int    @default(500000) // auto-approve requests up to this value
   maxReturnsPer90Days     Int    @default(3) // more than this sends the request to review
   requirePhotoForDamage   Boolean @default(true)
+  // SMS / WhatsApp hook (Milestone 4)
+  messagingHookUrl        String?
+  messagingHookSecretEnc  String?
+  messagingChannels       String  @default("[]") // JSON ("sms" | "whatsapp")[]
   webhookSecretEnc  String
   nextReturnNumber  Int      @default(1001)
   createdAt         DateTime @default(now())
@@ -74,6 +78,7 @@ model User {
   email        String    @unique
   name         String
   passwordHash String
+  sessionVersion Int     @default(0) // bump to sign the user out everywhere
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -139,6 +144,7 @@ model Order {
 
   @@unique([organizationId, orderNumber])
   @@index([organizationId, placedAt])
+  @@index([organizationId, customerId])
   @@index([organizationId, source])
 }
 
@@ -189,6 +195,7 @@ model ReturnRequest {
   riskFactors     String   @default("[]") // JSON [{ label, points }]
   holdRefund      Boolean  @default(false)
   resolvedAt      DateTime?
+  resolutionLock  String? // set while a refund/credit/replacement is being issued
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -206,6 +213,8 @@ model ReturnRequest {
 
   @@unique([organizationId, number])
   @@index([organizationId, status, createdAt])
+  @@index([organizationId, customerId, createdAt])
+  @@index([organizationId, createdAt])
 }
 
 model ReturnItem {
@@ -225,6 +234,8 @@ model ReturnItem {
   orderItem     OrderItem     @relation(fields: [orderItemId], references: [id])
   photos        ReturnPhoto[]
   inspection    Inspection?
+
+  @@index([returnId])
 }
 
 model ReturnPhoto {
@@ -458,6 +469,7 @@ model Refund {
   returnRequest ReturnRequest @relation(fields: [returnId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, createdAt])
+  @@index([returnId])
 }
 
 /// Stock effect of an inspected item, and whether it was synced to the store.
@@ -480,4 +492,18 @@ model InventoryMovement {
 
   @@index([organizationId, createdAt])
   @@index([organizationId, sku])
+}
+
+/// Messages sent through the public website's contact form.
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  company   String?
+  topic     String // sales | support | partnership | privacy | other
+  message   String
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }

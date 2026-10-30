@@ -1,7 +1,7 @@
 import { db, type Tx } from "../db.js";
 import type { Order, OrderItem, Customer, Organization, ReturnRequest } from "../generated/prisma/client.js";
 import { audit, type Actor } from "../lib/audit.js";
-import { badRequest, forbidden, notFound } from "../lib/errors.js";
+import { badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
 import { can, type Role } from "../auth/rbac.js";
 import { queueNotification } from "../notify/index.js";
 import type { TemplateKey, TemplateVars } from "../notify/templates.js";
@@ -30,7 +30,9 @@ const eventActor = (a: Actor) => ({
 export async function moveTo(tx: Tx, ret: Pick<ReturnRequest, "id" | "status" | "organizationId">, to: ReturnStatus, actor: Actor, message: string, data: Record<string, unknown> = {}) {
   const allowed = TRANSITIONS[ret.status as ReturnStatus] ?? [];
   if (!allowed.includes(to)) throw badRequest(`A return can't move from “${ret.status.replace(/_/g, " ")}” to “${to.replace(/_/g, " ")}”`);
-  await tx.returnRequest.update({ where: { id: ret.id }, data: { status: to, ...data } });
+  // Compare-and-set: if another request changed the status meanwhile, stop instead of overwriting it.
+  const { count } = await tx.returnRequest.updateMany({ where: { id: ret.id, status: ret.status }, data: { status: to, ...data } });
+  if (count === 0) throw conflict("This return was just updated by someone else — refresh and try again");
   await tx.returnEvent.create({ data: { organizationId: ret.organizationId, returnId: ret.id, type: "status", status: to, message, ...eventActor(actor) } });
   ret.status = to;
 }
@@ -199,6 +201,14 @@ export async function approveReturn(s: StaffCtx, id: string, note?: string) {
   const override = r.status === "rejected";
   if (r.requiresManager || override) {
     if (!can(s.role, "returns:decide_escalated")) throw forbidden(override ? "Only a manager can override a rejection" : "This return needs manager approval");
+  }
+  if (override) {
+    // While rejected, these units were free to be returned again; make sure they haven't been.
+    const items = await db.returnItem.findMany({ where: { returnId: r.id }, include: { orderItem: { include: { returnItems: { where: { returnId: { not: r.id }, returnRequest: { status: { not: "rejected" } } }, select: { quantity: true } } } } } });
+    for (const it of items) {
+      const elsewhere = it.orderItem.returnItems.reduce((s, x) => s + x.quantity, 0);
+      if (elsewhere + it.quantity > it.orderItem.quantity) throw badRequest(`Can't override: ${it.orderItem.name} is already covered by another return`);
+    }
   }
   await db.$transaction(async (tx) => {
     await moveTo(tx, r, "approved", s.actor, override ? `Rejection overridden and approved by ${s.actor.label}${note ? ` — ${note}` : ""}` : `Approved by ${s.actor.label}${note ? ` — ${note}` : ""}`, {

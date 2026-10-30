@@ -6,6 +6,7 @@ import { auth, requirePermission } from "../auth/middleware.js";
 import { parseList } from "../returns/eligibility.js";
 import { canResolve, syncRestock } from "../returns/resolution.js";
 import { rma } from "./shared.js";
+import { findAllInPages } from "../lib/batch.js";
 
 /** Role work queues for Milestone 3: warehouse inspection, finance refunds, inventory, risk. */
 export const workRouter = Router();
@@ -93,7 +94,7 @@ workRouter.get("/inventory", requirePermission("inventory:view"), async (req, re
   });
 });
 
-workRouter.post("/inventory/:id/sync", requirePermission("inventory:view"), async (req, res) => {
+workRouter.post("/inventory/:id/sync", requirePermission("inspection:perform"), async (req, res) => {
   const { orgId } = auth(req);
   const mv = await db.inventoryMovement.findFirst({ where: { id: String(req.params.id), organizationId: orgId } });
   if (!mv) throw notFound();
@@ -109,11 +110,12 @@ workRouter.get("/risk", requirePermission("risk:view"), async (req, res) => {
   const { orgId } = auth(req);
   const now = Date.now();
   const since90 = new Date(now - 90 * DAY);
-  const returns = await db.returnRequest.findMany({
+  const returns = await findAllInPages((p) => db.returnRequest.findMany({
+    ...p,
     where: { organizationId: orgId, createdAt: { gte: since90 } },
     include: { customer: { select: { id: true, name: true, email: true } }, order: { select: { shippingAddress: true } }, items: { include: { orderItem: { select: { sku: true, name: true } } } } },
-    orderBy: { createdAt: "desc" },
-  });
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+  }));
   const valid = returns.filter((r) => r.status !== "rejected");
 
   const byCustomer = new Map<string, { name: string; email: string; count: number; valueMinor: number; highValue: number; rmas: string[] }>();

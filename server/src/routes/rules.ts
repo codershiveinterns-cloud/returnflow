@@ -28,7 +28,10 @@ rulesRouter.patch("/:id", async (req, res) => {
   const a = auth(req);
   const existing = await db.automationRule.findFirst({ where: { id: param(req.params.id), organizationId: a.orgId } });
   if (!existing) throw notFound("Rule not found");
-  const { conditions, ...body } = ruleInput.partial().parse(req.body);
+  const sent = new Set(Object.keys(req.body ?? {}));
+  const parsed = ruleInput.partial().parse(req.body);
+  // partial() still fills defaults (enabled, priority, match) — keep only fields the client sent.
+  const { conditions, ...body } = Object.fromEntries(Object.entries(parsed).filter(([k]) => sent.has(k))) as Partial<typeof parsed>;
   const rule = await db.automationRule.update({ where: { id: existing.id }, data: { ...body, ...(conditions && { conditions: JSON.stringify(conditions) }) } });
   await audit({ organizationId: a.orgId, actor: a.actor, action: body.enabled !== undefined && Object.keys(body).length === 1 && !conditions ? (body.enabled ? "rule.enabled" : "rule.disabled") : "rule.updated", entityType: "rule", entityId: rule.id, meta: { name: rule.name }, req });
   res.json(serialize(rule));

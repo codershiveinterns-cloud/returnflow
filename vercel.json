@@ -5,7 +5,7 @@
       "root": "server",
       "framework": "express",
       "buildCommand": "npm run build:vercel",
-      "entrypoint": "src/index.ts"
+      "entrypoint": "dist/index.js"
     },
     "web": {
       "root": "web",

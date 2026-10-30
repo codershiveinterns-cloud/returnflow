@@ -50,6 +50,7 @@ export function SignupPage() {
         <Button type="submit" size="lg" className="w-full !h-11" loading={loading}>
           Create workspace
         </Button>
+        <p className="text-[12.5px] text-muted text-center">By creating a workspace you agree to the <Link to="/terms" className="underline underline-offset-2">Terms of Service</Link> and <Link to="/privacy" className="underline underline-offset-2">Privacy Policy</Link>.</p>
       </form>
     </AuthShell>
   );

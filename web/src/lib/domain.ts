@@ -110,6 +110,7 @@ export type Permission =
   | "refunds:issue"
   | "inventory:view"
   | "risk:view"
+  | "analytics:view"
   | "integrations:manage"
   | "team:view"
   | "team:manage"

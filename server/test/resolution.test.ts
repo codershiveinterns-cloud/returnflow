@@ -89,7 +89,8 @@ describe("receive → inspect → resolve", () => {
 
   it("holds risky refunds until inspection and blocks the wrong roles", async () => {
     const finance = await login("finance@kaveri.test");
-    const held = (await returns(finance, "received")).find((r: any) => r.id);
+    const held = (await finance.get("/api/work/refunds")).body.onHold[0];
+    expect(held).toBeTruthy();
     const res = await finance.post(`/api/returns/${held.id}/resolve`).send({ kind: "refund", method: "razorpay" });
     expect(res.status).toBe(400);
     expect(res.body.error.message).toMatch(/on hold until the items are inspected/);

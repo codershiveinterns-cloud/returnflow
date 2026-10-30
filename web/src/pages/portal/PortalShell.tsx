@@ -35,7 +35,7 @@ export function PortalShell({ org, children, hero }: { org: Organization; childr
             Need help? <a className="underline underline-offset-2" href={`mailto:${org.supportEmail}`}>{org.supportEmail}</a>
           </p>
         )}
-        Returns powered by <span className="font-medium text-muted">ReturnFlow</span>
+        Returns powered by <span className="font-medium text-muted">ReturnFlow</span> · <Link to="/privacy" className="underline underline-offset-2">Privacy</Link>
       </footer>
     </div>
   );
